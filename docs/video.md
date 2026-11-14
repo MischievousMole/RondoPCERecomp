@@ -22,3 +22,10 @@ No frame interpolation (would invent frames the game never drew).
 ## Cost (CPU, multithreaded rows)
 2-core container: sharp 13.6 ms, scanlines 17.4 ms, CRT 24.3 ms per frame at 1440p; single thread CRT 33 ms.
 Expected ~5-8 ms on an 8+ thread desktop. A GPU shader path can replace this later.
+
+## GPU path (shaders/rondo_video.vert/.frag) - 2026-11-14
+- GLSL 3.30 core, one pass, full-screen triangle; source frame as RGBA8 texture (alpha = sprite layer), texelFetch only.
+- Same math as the CPU reference; tools/shader_test.py renders it headless (Mesa EGL via moderngl) and compares:
+  pixel bit-exact; sharp/scanlines/CRT/layers max 6/255, PSNR 52-69 dB (CPU uses 32-level beam and 4096-entry LUTs).
+- The player will use this path; the CPU scaler stays as reference/fallback.
+- "1440p" = picture scaled to the full 1440 height at the original aspect (1872x1440), black bars on the sides.
