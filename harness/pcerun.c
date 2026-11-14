@@ -76,6 +76,10 @@ int main(int argc, char **argv) {
             }
         }
         pce_run_frame(&M);
+        if (getenv("PCE_RAMLOG") && f % atol(getenv("PCE_RAMLOG")) == 0) {
+            static FILE *rl; if (!rl) { snprintf(path, sizeof path, "%s/ramlog.bin", out); rl = fopen(path, "wb"); }
+            fwrite(&f, sizeof f, 1, rl); fwrite(M.ram, 1, 0x2000, rl);
+        }
         if (getenv("PCE_DUMP") && f == atol(getenv("PCE_DUMP"))) {
             snprintf(path, sizeof path, "%s/mem_%06ld.bin", out, f);
             FILE *fd = fopen(path, "wb");

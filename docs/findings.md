@@ -38,3 +38,10 @@ ex_rnd, ex_scrmod, ex_imode, ex_colorcmd, ex_dotmod, ex_bcdbin, ma_mul8u/mul8s/d
 ## Coverage 2026-11-13
 65 bank versions, 41,695 executed instruction addresses (Stage 0-1 random play + 16 stage-save warps).
 Difftest on 8 stage saves x 30,000 frames: 423,762 checks, 0 failures, 99.9-100% native.
+
+## Invincibility / boss coverage 2026-11-13
+- Player health: $2098 (max $5C), HUD copy $2099. `PCE_POKE=8400-99999:2098=5c` keeps Richter alive.
+- 8 saves x 60,000 frames invincible random play: castle interiors, skyline bridge, dungeon, cave, balcony, giant-bat boss.
+- Totals: 46,929 executed instruction addresses in 65 bank versions; 46,722 translated, 0 bails.
+- Difftest (same 8 saves, native, invincible): 567,589 checks, 0 failures, 99.9-100% native.
+- The "raster split" in the carriage cutscene is the game's intended portrait-to-carriage wipe, not a bug.
