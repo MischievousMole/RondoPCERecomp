@@ -49,6 +49,7 @@ static GLuint compile(GLenum type, const char *src) {
 static int present_mode = VP_120_REPEAT;
 static int sync_mode = 2;   /* 0 auto, 1 vblank-locked, 2 VRR/clock (default: original speed) */
 static int fullscreen = 1;
+static const char *menu_shot;   /* test hook */
 static float vol[4] = { 1, 1, 1, 1 };     /* master, music, sfx, voices */
 static const int def_keys[MENU_NBIND] = { SDL_SCANCODE_UP, SDL_SCANCODE_DOWN, SDL_SCANCODE_LEFT, SDL_SCANCODE_RIGHT,
                                           SDL_SCANCODE_X, SDL_SCANCODE_Z, SDL_SCANCODE_RETURN, SDL_SCANCODE_RSHIFT };
@@ -281,7 +282,7 @@ int main(int argc, char **argv) {
                 p += nn; if (*p == ',') p++; else break;
             }
             static long shot_at = -1; if (shot_at < 0) shot_at = getenv("RONDO_SHOT_AT") ? atol(getenv("RONDO_SHOT_AT")) : 0;
-            if (iter == shot_at) setenv("RONDO_MENU_SHOT", getenv("RONDO_SHOT_FILE"), 1);
+            if (iter == shot_at) menu_shot = getenv("RONDO_SHOT_FILE");
         }
         while (SDL_PollEvent(&e)) {
             if (e.type == SDL_QUIT) { running = 0; break; }
@@ -362,10 +363,10 @@ int main(int argc, char **argv) {
             pglUseProgram(ovprog); pglUniform2f(uOvFb, fw, fh);
             glDrawArrays(GL_TRIANGLES, 0, 3);
             pglUseProgram(prog); glDisable(GL_BLEND);
-            if (getenv("RONDO_MENU_SHOT")) {   /* test hook: capture the menu once and exit */
+            if (menu_shot) {   /* test hook: capture the menu once and exit */
                 static uint8_t px2[3840 * 2160 * 3];
                 glReadPixels(0, 0, fw, fh, GL_RGB, GL_UNSIGNED_BYTE, px2);
-                FILE *o = fopen(getenv("RONDO_MENU_SHOT"), "wb"); fprintf(o, "P6\n%d %d\n255\n", fw, fh);
+                FILE *o = fopen(menu_shot, "wb"); fprintf(o, "P6\n%d %d\n255\n", fw, fh);
                 for (int y = fh - 1; y >= 0; y--) fwrite(px2 + y * fw * 3, 3, fw, o);
                 fclose(o); running = 0;
             }
