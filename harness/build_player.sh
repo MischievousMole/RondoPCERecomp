@@ -7,7 +7,8 @@ def cstr(p):
     return '"' + open(p).read().replace('\\', '\\\\').replace('"', '\\"').replace('\n', '\\n"\n"') + '"'
 open('shaders_gen.h', 'w').write('static const char SHADER_VERT[] = ' + cstr('../shaders/rondo_video.vert') + ';\nstatic const char SHADER_FRAG[] = ' + cstr('../shaders/rondo_video.frag') + ';\n')
 PY
-SRC="player.c pce.c cpu6280.c bios_hle.c render.c audio.c video.c disc.c native/*.c"
+python3 ../tools/gen_font.py font_gen.h
+SRC="player.c menu.c pce.c cpu6280.c bios_hle.c render.c audio.c video.c disc.c native/*.c"
 T=${1:-linux}
 OUT=../build/player/$T; mkdir -p $OUT
 if [ "$T" = windows ]; then

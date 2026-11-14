@@ -22,6 +22,7 @@ void audio_reset(audio_t *a) {
     memset(a, 0, sizeof *a);
     if (!tabs_ready) init_tabs();
     for (int i = 0; i < 6; i++) a->ch[i].lfsr = 1;
+    a->g_master = a->g_cd = a->g_psg = a->g_ad = 1.0f;
 }
 
 void psg_write(audio_t *a, int r, uint8_t v) {
@@ -119,7 +120,7 @@ void audio_render(audio_t *a, int16_t *out, int n) {
             L += amp * lr_tab[c->bal >> 4] * ml;
             R += amp * lr_tab[c->bal & 15] * mr;
         }
-        L *= 0.18f; R *= 0.18f;
+        L *= 0.18f * a->g_psg; R *= 0.18f * a->g_psg;
         if (a->ad_on) {
             a->ad_frac += a->ad_rate / RATE;
             while (a->ad_frac >= 1.0 && a->ad_on) {
@@ -127,13 +128,13 @@ void audio_render(audio_t *a, int16_t *out, int n) {
                 a->ad_last = adpcm_next(a) / 2048.0f;
                 if (a->ad_pos >= a->ad_end) a->ad_on = 0;
             }
-            L += a->ad_last * 0.5f * a->ad_vol; R += a->ad_last * 0.5f * a->ad_vol;
+            L += a->ad_last * 0.5f * a->ad_vol * a->g_ad; R += a->ad_last * 0.5f * a->ad_vol * a->g_ad;
         }
         if (a->cd_on && a->cd_fetch) {
             int16_t lr[2] = {0, 0};
             if (a->cd_fetch(a->cd_ctx, (long)a->cd_pos, lr)) {
-                L += lr[0] / 32768.0f * 0.8f * a->cd_vol;
-                R += lr[1] / 32768.0f * 0.8f * a->cd_vol;
+                L += lr[0] / 32768.0f * 0.8f * a->cd_vol * a->g_cd;
+                R += lr[1] / 32768.0f * 0.8f * a->cd_vol * a->g_cd;
             }
             a->cd_pos += 44100.0 / RATE;
             if (a->cd_pos >= a->cd_end) {
@@ -144,6 +145,7 @@ void audio_render(audio_t *a, int16_t *out, int n) {
                 if (a->cd_vol <= 0) { a->cd_vol = 0; a->cd_fade = 0; }
             }
         }
+        L *= a->g_master; R *= a->g_master;
         int il = (int)(L * 32767), ir = (int)(R * 32767);
         out[s * 2] = il > 32767 ? 32767 : il < -32768 ? -32768 : il;
         out[s * 2 + 1] = ir > 32767 ? 32767 : ir < -32768 ? -32768 : ir;

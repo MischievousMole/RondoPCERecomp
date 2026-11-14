@@ -21,6 +21,7 @@ typedef struct audio {
     float cd_vol, cd_fade;               /* fade: volume change per output sample */
     int (*cd_fetch)(void *ctx, long sample, int16_t *lr);
     void *cd_ctx;
+    float g_master, g_cd, g_psg, g_ad;    /* user volumes */
 } audio_t;
 
 void audio_reset(audio_t *a);
