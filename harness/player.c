@@ -52,11 +52,12 @@ static int fullscreen = 1;
 static const char *menu_shot;   /* test hook */
 static float vol[4] = { 1, 1, 1, 1 };     /* master, music, sfx, voices */
 static const int def_keys[MENU_NBIND] = { SDL_SCANCODE_UP, SDL_SCANCODE_DOWN, SDL_SCANCODE_LEFT, SDL_SCANCODE_RIGHT,
-                                          SDL_SCANCODE_X, SDL_SCANCODE_Z, SDL_SCANCODE_RETURN, SDL_SCANCODE_RSHIFT };
+                                          SDL_SCANCODE_Z, SDL_SCANCODE_X, SDL_SCANCODE_RETURN, SDL_SCANCODE_RSHIFT };
 static const int def_pads[MENU_NBIND] = { SDL_CONTROLLER_BUTTON_DPAD_UP, SDL_CONTROLLER_BUTTON_DPAD_DOWN, SDL_CONTROLLER_BUTTON_DPAD_LEFT,
-                                          SDL_CONTROLLER_BUTTON_DPAD_RIGHT, SDL_CONTROLLER_BUTTON_A, SDL_CONTROLLER_BUTTON_X,
+                                          SDL_CONTROLLER_BUTTON_DPAD_RIGHT, SDL_CONTROLLER_BUTTON_X, SDL_CONTROLLER_BUTTON_A,
                                           SDL_CONTROLLER_BUTTON_START, SDL_CONTROLLER_BUTTON_BACK };
 static int keymap[MENU_NBIND], padmap[MENU_NBIND];
+static int binds_v = 0;   /* 1 = jump/attack rows in true PCE order */
 static void load_ini(void) {
     FILE *f = fopen(ini_path, "r"); if (!f) return;
     char k[64]; float v;
@@ -67,6 +68,7 @@ static void load_ini(void) {
         else if (!strcmp(k, "aspect")) V.aspect = (int)v; else if (!strcmp(k, "fullscreen")) fullscreen = (int)v;
         else if (!strcmp(k, "vol_master")) vol[0] = v; else if (!strcmp(k, "vol_music")) vol[1] = v;
         else if (!strcmp(k, "vol_sfx")) vol[2] = v; else if (!strcmp(k, "vol_voices")) vol[3] = v;
+        else if (!strcmp(k, "binds_v")) binds_v = (int)v;
         else if (!strncmp(k, "key", 3) && k[3] >= '0' && k[3] < '0' + MENU_NBIND) keymap[k[3] - '0'] = (int)v;
         else if (!strncmp(k, "pad", 3) && k[3] >= '0' && k[3] < '0' + MENU_NBIND) padmap[k[3] - '0'] = (int)v;
         else if (!strcmp(k, "bg_brightness")) V.bri[0] = v; else if (!strcmp(k, "bg_contrast")) V.con[0] = v;
@@ -80,6 +82,7 @@ static void save_ini(void) {
     fprintf(f, "sync=%d\nfilter=%d\ninteger=%d\npresent=%d\nbg_brightness=%.2f\nbg_contrast=%.2f\nsprite_brightness=%.2f\nsprite_contrast=%.2f\nscanlines=%.2f\nmask=%.2f\n",
             sync_mode, V.filter, V.integer, present_mode, V.bri[0], V.con[0], V.bri[1], V.con[1], V.scan_strength, V.mask_strength);
     fprintf(f, "aspect=%d\nfullscreen=%d\nvol_master=%.2f\nvol_music=%.2f\nvol_sfx=%.2f\nvol_voices=%.2f\n", V.aspect, fullscreen, vol[0], vol[1], vol[2], vol[3]);
+    fprintf(f, "binds_v=1\n");
     for (int i = 0; i < MENU_NBIND; i++) fprintf(f, "key%d=%d\npad%d=%d\n", i, keymap[i], i, padmap[i]);
     fclose(f);
 }
@@ -156,7 +159,7 @@ static void audio_flush(double scale) {
 static double now_s(void) { return SDL_GetPerformanceCounter() / (double)SDL_GetPerformanceFrequency(); }
 
 static uint8_t pad_from_input(const Uint8 *k, SDL_GameController *gc) {
-    static const uint8_t bit[MENU_NBIND] = { 0x10, 0x40, 0x80, 0x20, 0x02, 0x01, 0x08, 0x04 };  /* PCE: II = jump, I = attack */
+    static const uint8_t bit[MENU_NBIND] = { 0x10, 0x40, 0x80, 0x20, 0x01, 0x02, 0x08, 0x04 };  /* PCE: I = jump, II = attack */
     uint8_t b = 0;
     for (int i = 0; i < MENU_NBIND; i++) {
         if (keymap[i] > 0 && keymap[i] < SDL_NUM_SCANCODES && k[keymap[i]]) b |= bit[i];
@@ -189,6 +192,9 @@ int main(int argc, char **argv) {
     video_default_cfg(&V);
     memcpy(keymap, def_keys, sizeof keymap); memcpy(padmap, def_pads, sizeof padmap);
     load_ini();
+    if (binds_v < 1) {   /* v6 settings: rows 4/5 held each other's buttons */
+        int t = keymap[4]; keymap[4] = keymap[5]; keymap[5] = t; t = padmap[4]; padmap[4] = padmap[5]; padmap[5] = t; binds_v = 1;
+    }
 
     char cue[1024], bios[1024], msg[1400];
     if (!find_file(base, ".cue", cue, sizeof cue, 3)) {
