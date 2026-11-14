@@ -1,0 +1,11 @@
+build/
+game/
+*.iso
+*.bin
+*.img
+*.cue
+*.ccd
+*.sub
+*.pce
+*.rom
+harness/pcerun
