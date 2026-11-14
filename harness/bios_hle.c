@@ -70,6 +70,34 @@ static void call_hook(pce_t *m, cpu6280 *c, uint16_t target) {
     c->pc = target;
 }
 
+/* backup RAM: one host file per BRAM entry under bram_dir, named by the 12-byte entry name */
+const char *bram_dir = "build/bram";
+static void bram_path(pce_t *m, char *out, size_t n) {
+    uint16_t np = ZP(m, AL) | (ZP(m, AH) << 8);
+    char name[40]; int k = 0;
+    for (int i = 0; i < 12; i++) k += sprintf(name + k, "%02X", cpu_read(&m->cpu, np + i));
+    snprintf(out, n, "%s/%s.sav", bram_dir, name);
+}
+static int bram_io(pce_t *m, cpu6280 *c, int write) {
+    char p[256]; bram_path(m, p, sizeof p);
+    uint16_t buf = ZP(m, BL) | (ZP(m, BH) << 8);
+    unsigned len = ZP(m, CL) | (ZP(m, CH) << 8), off = ZP(m, DL) | (ZP(m, DH) << 8);
+    uint8_t data[2048] = {0};
+    FILE *f = fopen(p, "rb"); size_t have = 0;
+    if (f) { have = fread(data, 1, sizeof data, f); fclose(f); }
+    if (!write) {
+        if (!f) return 1;
+        for (unsigned i = 0; i < len && off + i < sizeof data; i++) cpu_write(c, buf + i, data[off + i]);
+        return 0;
+    }
+    for (unsigned i = 0; i < len && off + i < sizeof data; i++) data[off + i] = cpu_read(c, buf + i);
+    if (off + len > have) have = off + len;
+    char cmd[300]; snprintf(cmd, sizeof cmd, "mkdir -p %s", bram_dir); if (system(cmd)) {}
+    f = fopen(p, "wb"); if (!f) return 2;
+    fwrite(data, 1, have, f); fclose(f);
+    return 0;
+}
+
 static void cd_read(pce_t *m, cpu6280 *c) {
     uint32_t lba = (ZP(m, CL) << 16) | (ZP(m, CH) << 8) | ZP(m, DL);
     uint8_t mode = ZP(m, DH);
@@ -218,19 +246,53 @@ int bios_hle_trap(void *ctx, cpu6280 *c) {
     case 65: { uint32_t r = (uint32_t)(ZP(m, AL) | ZP(m, AH) << 8) * (ZP(m, BL) | ZP(m, BH) << 8);
                ZP(m, CL) = r; ZP(m, CH) = r >> 8; ZP(m, DL) = r >> 16; ZP(m, DH) = r >> 24; break; }
     case 76: colorcmd(m); break;
+    case 26: c->a = bram_io(m, c, 0); break;                           /* bm_read */
+    case 27: c->a = bram_io(m, c, 1); break;                           /* bm_write */
+    case 28: { char p[256]; bram_path(m, p, sizeof p); remove(p); c->a = 0; break; } /* bm_delete */
+    case 25: ZP(m, CL) = 0x00; ZP(m, CH) = 0x07; c->a = 0; break;       /* bm_free: 1792 bytes */
+    case 24: c->a = 0; break;                                          /* bm_format */
+    case 33: {                                                         /* ex_joysns */
+        uint8_t now = m->joy_buttons, old = RAMB(m, 0x2228);
+        RAMB(m, 0x2232) = old; RAMB(m, 0x2228) = now;
+        RAMB(m, 0x222D) = now & ~old;
+        break;
+    }
     case 16: case 22: m->adpcm_playing = 0; c->a = 0; break;            /* ad_reset / ad_stop */
     case 23: c->a = m->adpcm_playing ? 1 : 0; c->x = c->a; break;      /* ad_stat */
-    case 17:                                                            /* ad_trans: CD -> ADPCM RAM */
-    case 18: {                                                          /* ad_read: CD -> ADPCM RAM */
+    case 17: {                                                          /* ad_trans: CD -> ADPCM RAM */
         uint32_t lba = (ZP(m, CL) << 16) | (ZP(m, CH) << 8) | ZP(m, DL);
-        uint16_t dst = ZP(m, BL) | (ZP(m, BH) << 8);
-        unsigned n = ZP(m, AL) | (ZP(m, AH) << 8);
-        if (ZP(m, DH) != 0) n = ZP(m, AL) * 2048;
+        uint16_t dst = ZP(m, DH) ? m->adpcm_wr : (ZP(m, BL) | (ZP(m, BH) << 8));
+        unsigned n = ZP(m, AL) * 2048;
         for (unsigned i = 0; i < n && lba * 2048 + i < (unsigned long)m->disc_sectors * 2048; i++)
             m->adpcm[(dst + i) & 0xFFFF] = m->disc[lba * 2048 + i];
-        if (m->verbose) fprintf(m->log, "  ad_read lba=%06X -> adpcm %04X len=%u type=%02X\n", lba, dst, n, ZP(m, DH));
+        m->adpcm_wr = dst + n;
+        if (m->verbose > 1) fprintf(m->log, "  ad_trans lba=%06X -> adpcm %04X len=%u\n", lba, dst, n);
         c->a = 0; break;
     }
+    case 18: case 19: {                                                 /* ad_read: ADPCM -> mem, ad_write: mem -> ADPCM */
+        uint16_t ad = ZP(m, CL) | (ZP(m, CH) << 8);
+        uint8_t mode = ZP(m, DH);
+        uint16_t addr = ZP(m, BL) | (ZP(m, BH) << 8);
+        unsigned n = ZP(m, AL) | (ZP(m, AH) << 8);
+        if (!n) n = 0x10000;
+        for (unsigned i = 0; i < n; i++) {
+            uint16_t a = ad + i;
+            if (mode == 0) {
+                if (id == 18) cpu_write(c, addr + i, m->adpcm[a]); else m->adpcm[a] = cpu_read(c, addr + i);
+            } else if (mode >= 2 && mode <= 6) {
+                uint32_t ph = ((uint32_t)(ZP(m, BL) + (i >> 13)) << 13) | (i & 0x1FFF);
+                if (id == 18) pce_write(m, ph, m->adpcm[a]); else m->adpcm[a] = pce_read(m, ph);
+            } else {                                                    /* VRAM, word address in bx */
+                uint16_t *w = &m->vdc.vram[(addr + i / 2) & 0x7FFF];
+                if (id == 18) *w = (i & 1) ? ((*w & 0xFF) | (m->adpcm[a] << 8)) : ((*w & 0xFF00) | m->adpcm[a]);
+                else m->adpcm[a] = (i & 1) ? (*w >> 8) : (*w & 0xFF);
+            }
+        }
+        if (mode >= 2 && mode <= 6) c->mpr[mode] = ZP(m, BL);
+        if (m->verbose > 1) fprintf(m->log, "  %s adpcm %04X %s mode=%02X addr=%04X len=%u\n", names[id], ad, id == 18 ? "->" : "<-", mode, addr, n);
+        c->a = 0; break;
+    }
+    case 7: case 11: case 12: case 13: c->a = 0; break;                 /* cd_search, cd_dinfo, cd_contnts, cd_subrd */
     case 20: case 21:                                                   /* ad_play / ad_cplay */
         if (m->verbose) fprintf(m->log, "  %s addr=%04X len=%04X rate=%02X mode=%02X\n", names[id],
             ZP(m, BL) | ZP(m, BH) << 8, ZP(m, AL) | ZP(m, AH) << 8, ZP(m, DH), ZP(m, DL));

@@ -44,6 +44,7 @@ typedef struct pce {
     uint8_t cd_regs[16];
     uint8_t adpcm[0x10000];
     int adpcm_playing;
+    uint16_t adpcm_wr;
     /* run state */
     long frame; int line;
     int64_t line_cycles;
