@@ -55,7 +55,27 @@ typedef struct pce {
     long bios_calls[64];
     int stop;
     long trace_left;
+    /* overlay-aware coverage: banks are re-identified after bulk loads */
+    uint32_t bank_hash[256];
+    uint8_t  bank_dirty[256];
+    struct ovl { uint32_t hash; uint8_t bank; uint8_t bits[1024]; } *ovl;
+    int novl, ovl_cap;
+    int cur_ovl[256];
+    const char *outdir;
+    long smc_writes;
+    /* native code */
+    int native_on, difftest_every;
+    int bulk_load;                     /* BIOS loader writing: not self-modifying code */
+    uint8_t (*volatile_map)[0x2000];   /* bytes patched at runtime: excluded from overlay hashes */
+    int16_t ovl_native[4096];          /* per overlay index: native table index, -1 none, -2 unresolved */
+    uint8_t ovl_native_off[4096];      /* native disabled for this overlay (self-modifying code) */
+    const uint8_t *native_cm[256];     /* codemap of the native overlay active in each bank */
+    int native_cm_ovl[256];
+    long native_calls, native_instr, interp_instr, diff_checks, diff_fails;
 } pce_t;
+void pce_mark_dirty(pce_t *m, uint8_t bank);
+void pce_save_coverage(pce_t *m);
+void pce_load_volatile(pce_t *m, const char *path);
 
 int  pce_init(pce_t *m, const char *disc_iso, const char *bios_rom);
 void pce_run_frame(pce_t *m);

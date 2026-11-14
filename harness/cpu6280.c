@@ -27,7 +27,7 @@ void cpu_reset(cpu6280 *c) {
     c->pc = rd16(c, 0xFFFE);
 }
 
-static void interrupt(cpu6280 *c, uint16_t vec, int brk) {
+void cpu_interrupt(cpu6280 *c, uint16_t vec, int brk) {
     cpu_push(c, c->pc >> 8); cpu_push(c, c->pc & 0xFF);
     cpu_push(c, (c->p & ~(F_B | F_T)) | (brk ? F_B : 0));
     c->p = (c->p & ~(F_D | F_T)) | F_I;
@@ -35,7 +35,7 @@ static void interrupt(cpu6280 *c, uint16_t vec, int brk) {
 }
 
 /* ALU helpers; the T flag redirects ADC/AND/EOR/ORA to zero page (X) */
-static void adc(cpu6280 *c, uint8_t m, uint8_t *acc) {
+void cpu_adc(cpu6280 *c, uint8_t m, uint8_t *acc) {
     uint8_t a = *acc; unsigned r;
     if (c->p & F_D) {
         unsigned lo = (a & 0x0F) + (m & 0x0F) + (c->p & F_C);
@@ -51,7 +51,7 @@ static void adc(cpu6280 *c, uint8_t m, uint8_t *acc) {
     c->p = (c->p & ~(F_C | F_V)) | (r > 0xFF ? F_C : 0) | ((~(a ^ m) & (a ^ r) & 0x80) ? F_V : 0);
     *acc = r & 0xFF; SETNZ(*acc);
 }
-static void sbc(cpu6280 *c, uint8_t m) {
+void cpu_sbc(cpu6280 *c, uint8_t m) {
     uint8_t a = c->a;
     if (c->p & F_D) {
         int lo = (a & 0x0F) - (m & 0x0F) - !(c->p & F_C);
@@ -68,10 +68,28 @@ static void sbc(cpu6280 *c, uint8_t m) {
     c->p = (c->p & ~(F_C | F_V)) | (r < 0x100 ? F_C : 0) | (((a ^ m) & (a ^ r) & 0x80) ? F_V : 0);
     c->a = r & 0xFF; SETNZ(c->a);
 }
-static void cmp(cpu6280 *c, uint8_t r, uint8_t m) {
+void cpu_cmp(cpu6280 *c, uint8_t r, uint8_t m) {
     unsigned d = r - m;
     c->p = (c->p & ~F_C) | (r >= m ? F_C : 0);
     SETNZ(d & 0xFF);
+}
+
+int cpu_block(cpu6280 *c, uint8_t op, uint16_t s, uint16_t d, uint16_t n) {
+    unsigned len = n ? n : 0x10000;
+    cpu_push(c, c->y); cpu_push(c, c->a); cpu_push(c, c->x);
+    for (unsigned i = 0; i < len; i++) {
+        uint8_t v = cpu_read(c, s);
+        cpu_write(c, d, v);
+        switch (op) {
+        case 0x73: s++; d++; break;                         /* TII */
+        case 0xC3: s--; d--; break;                         /* TDD */
+        case 0xD3: s++; break;                              /* TIN */
+        case 0xE3: s++; d += (i & 1) ? -1 : 1; break;       /* TIA */
+        case 0xF3: d++; s += (i & 1) ? -1 : 1; break;       /* TAI */
+        }
+    }
+    c->x = cpu_pull(c); c->a = cpu_pull(c); c->y = cpu_pull(c);
+    return 17 + 6 * len;
 }
 
 int cpu_step(cpu6280 *c) {
@@ -80,7 +98,7 @@ int cpu_step(cpu6280 *c) {
         uint8_t live = c->irq_pending & ~c->irq_mask;
         if (live) {
             uint16_t vec = (live & IRQ_TIMER) ? 0xFFFA : (live & IRQ_IRQ1) ? 0xFFF8 : 0xFFF6;
-            interrupt(c, vec, 0);
+            cpu_interrupt(c, vec, 0);
             c->halted = 0;
             return 8;
         }
@@ -88,6 +106,7 @@ int cpu_step(cpu6280 *c) {
     if (c->halted) return 4;
 
     int t = (c->p & F_T) != 0;
+    c->ninstr++;
     uint8_t op = fetch(c);
     uint16_t ea = 0; uint8_t m, zp; int cyc = 2;
     c->p &= ~F_T;
@@ -112,7 +131,7 @@ int cpu_step(cpu6280 *c) {
 #define OP_ORA(v) TACC(acc |= (v); SETNZ(acc))
 #define OP_AND(v) TACC(acc &= (v); SETNZ(acc))
 #define OP_EOR(v) TACC(acc ^= (v); SETNZ(acc))
-#define OP_ADC(v) TACC(adc(c, (v), &acc))
+#define OP_ADC(v) TACC(cpu_adc(c, (v), &acc))
 
 #define GROUP(base, OPM) \
     case base+0x01: EA_IZX; OPM(RM()); cyc = 7; break; \
@@ -125,8 +144,8 @@ int cpu_step(cpu6280 *c) {
     case base+0x19: EA_ABY; OPM(RM()); cyc = 5; break; \
     case base+0x1D: EA_ABX; OPM(RM()); cyc = 5; break;
 
-#define OP_SBC(v) sbc(c, (v))
-#define OP_CMP(v) cmp(c, c->a, (v))
+#define OP_SBC(v) cpu_sbc(c, (v))
+#define OP_CMP(v) cpu_cmp(c, c->a, (v))
 #define OP_LDA(v) do { c->a = (v); SETNZ(c->a); } while (0)
 
 /* read-modify-write */
@@ -212,12 +231,12 @@ int cpu_step(cpu6280 *c) {
     case 0x9C: EA_ABS; WM(0); cyc = 5; break;
     case 0x9E: EA_ABX; WM(0); cyc = 5; break;
     /* compares */
-    case 0xE0: cmp(c, c->x, fetch(c)); break;
-    case 0xE4: EA_ZP;  cmp(c, c->x, RZ()); cyc = 4; break;
-    case 0xEC: EA_ABS; cmp(c, c->x, RM()); cyc = 5; break;
-    case 0xC0: cmp(c, c->y, fetch(c)); break;
-    case 0xC4: EA_ZP;  cmp(c, c->y, RZ()); cyc = 4; break;
-    case 0xCC: EA_ABS; cmp(c, c->y, RM()); cyc = 5; break;
+    case 0xE0: cpu_cmp(c, c->x, fetch(c)); break;
+    case 0xE4: EA_ZP;  cpu_cmp(c, c->x, RZ()); cyc = 4; break;
+    case 0xEC: EA_ABS; cpu_cmp(c, c->x, RM()); cyc = 5; break;
+    case 0xC0: cpu_cmp(c, c->y, fetch(c)); break;
+    case 0xC4: EA_ZP;  cpu_cmp(c, c->y, RZ()); cyc = 4; break;
+    case 0xCC: EA_ABS; cpu_cmp(c, c->y, RM()); cyc = 5; break;
     /* BIT / TSB / TRB / TST */
     case 0x89: { uint8_t v = fetch(c); BITF(v, c->a); break; }
     case 0x24: { EA_ZP;  uint8_t v = RZ(); BITF(v, c->a); cyc = 4; break; }
@@ -252,7 +271,7 @@ int cpu_step(cpu6280 *c) {
                  cpu_push(c, r >> 8); cpu_push(c, r & 0xFF); c->pc = a; cyc = 7; break; }
     case 0x60: { uint16_t l = cpu_pull(c); c->pc = (l | (cpu_pull(c) << 8)) + 1; cyc = 7; break; }
     case 0x40: { c->p = cpu_pull(c); uint16_t l = cpu_pull(c); c->pc = l | (cpu_pull(c) << 8); cyc = 7; break; }
-    case 0x00: c->pc++; interrupt(c, 0xFFF6, 1); cyc = 8; break;
+    case 0x00: c->pc++; cpu_interrupt(c, 0xFFF6, 1); cyc = 8; break;
     /* stack */
     case 0x48: cpu_push(c, c->a); cyc = 3; break;
     case 0xDA: cpu_push(c, c->x); cyc = 3; break;
@@ -295,21 +314,7 @@ int cpu_step(cpu6280 *c) {
     case 0x43: { uint8_t mk = fetch(c); for (int i = 0; i < 8; i++) if (mk & (1 << i)) { c->a = c->mpr[i]; break; } cyc = 4; break; }
     case 0x73: case 0xC3: case 0xD3: case 0xE3: case 0xF3: {
         uint16_t s = fetch16(c), d = fetch16(c), n = fetch16(c);
-        unsigned len = n ? n : 0x10000;
-        cpu_push(c, c->y); cpu_push(c, c->a); cpu_push(c, c->x);
-        for (unsigned i = 0; i < len; i++) {
-            uint8_t v = cpu_read(c, s);
-            cpu_write(c, d, v);
-            switch (op) {
-            case 0x73: s++; d++; break;                         /* TII */
-            case 0xC3: s--; d--; break;                         /* TDD */
-            case 0xD3: s++; break;                              /* TIN */
-            case 0xE3: s++; d += (i & 1) ? -1 : 1; break;       /* TIA */
-            case 0xF3: d++; s += (i & 1) ? -1 : 1; break;       /* TAI */
-            }
-        }
-        c->x = cpu_pull(c); c->a = cpu_pull(c); c->y = cpu_pull(c);
-        cyc = 17 + 6 * len; break;
+        cyc = cpu_block(c, op, s, d, n); break;
     }
     case 0xFB: /* HLE trap */
         if (c->trap && c->trap(c->ctx, c)) return -1;

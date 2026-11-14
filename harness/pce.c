@@ -2,6 +2,14 @@
 #include <stdlib.h>
 #include <string.h>
 #include "pce.h"
+#include "recomp_rt.h"
+
+uint32_t g_ovl_epoch;
+#ifndef NO_NATIVE_TABLE
+#else
+const native_ovl_t g_native_table[1];
+const int g_native_count = 0;
+#endif
 
 static const int vram_inc[4] = { 1, 32, 64, 128 };
 
@@ -122,6 +130,23 @@ void pce_write(void *ctx, uint32_t a, uint8_t v) {
     pce_t *m = ctx;
     uint8_t bank = a >> 13; uint16_t off = a & 0x1FFF;
     if (bank < 0x20) { if (m->verbose) fprintf(m->log, "ROM write %06X=%02X pc=%04X\n", a, v, m->cpu.pc); return; }
+    if (!m->bulk_load && m->cur_ovl[bank] >= 0 && !m->bank_dirty[bank] && !m->volatile_map[bank][off]) {
+        int o = m->cur_ovl[bank];
+        int code = (m->ovl[o].bits[off >> 3] >> (off & 7) & 1) ||
+                   (m->native_cm[bank] && (m->native_cm[bank][off >> 3] >> (off & 7) & 1));
+        if (code) {
+            /* CPU wrote over executed code: overlay copy or self-modification -> re-identify the bank */
+            m->smc_writes++;
+            if (m->verbose && m->smc_writes < 50)
+                fprintf(m->log, "code write %06X=%02X (ovl %02X_%08X) pc=%04X frame %ld\n", a, v, m->ovl[o].bank, m->ovl[o].hash, m->cpu.pc, m->frame);
+            if (m->outdir) {
+                char p[512]; snprintf(p, sizeof p, "%s/ovl/codewrites.txt", m->outdir);
+                FILE *f = fopen(p, "a");
+                if (f) { fprintf(f, "%02X_%08X %04X %04X\n", m->ovl[o].bank, m->ovl[o].hash, off, m->cpu.pc); fclose(f); }
+            }
+            pce_mark_dirty(m, bank);
+        }
+    }
     if (bank >= 0x68 && bank < 0x80) { m->scdram[a - 0x68 * 0x2000] = v; return; }
     if (bank >= 0x80 && bank < 0x88) { m->cdram[a - 0x80 * 0x2000] = v; return; }
     if (bank >= 0xF8 && bank < 0xFC) { m->ram[off] = v; return; }
@@ -181,17 +206,116 @@ static void timer_tick(pce_t *m, int cyc) {
     }
 }
 
+static uint32_t fnv(const uint8_t *p, int n) {
+    uint32_t h = 2166136261u;
+    for (int i = 0; i < n; i++) { h ^= p[i]; h *= 16777619u; }
+    return h;
+}
+
+void pce_mark_dirty(pce_t *m, uint8_t bank) { m->bank_dirty[bank] = 1; m->native_cm[bank] = NULL; g_ovl_epoch++; }
+
+static int ovl_lookup(pce_t *m, uint8_t bank) {
+    uint8_t buf[0x2000];
+    for (int i = 0; i < 0x2000; i++) buf[i] = pce_read(m, ((uint32_t)bank << 13) | i);
+    uint8_t hb[0x2000];
+    for (int i = 0; i < 0x2000; i++) hb[i] = m->volatile_map[bank][i] ? 0 : buf[i];
+    uint32_t h = fnv(hb, 0x2000) ^ bank;
+    for (int i = 0; i < m->novl; i++) if (m->ovl[i].hash == h && m->ovl[i].bank == bank) return i;
+    if (m->novl == m->ovl_cap) { m->ovl_cap = m->ovl_cap ? m->ovl_cap * 2 : 64; m->ovl = realloc(m->ovl, m->ovl_cap * sizeof *m->ovl); }
+    struct ovl *o = &m->ovl[m->novl];
+    o->hash = h; o->bank = bank; memset(o->bits, 0, sizeof o->bits);
+    if (m->outdir) {
+        char p[512]; snprintf(p, sizeof p, "%s/ovl/bank_%02X_%08X.bin", m->outdir, bank, h);
+        FILE *f = fopen(p, "wb"); if (f) { fwrite(buf, 1, 0x2000, f); fclose(f); }
+    }
+    return m->novl++;
+}
+
+void pce_save_coverage(pce_t *m) {
+    if (!m->outdir) return;
+    char p[512];
+    for (int i = 0; i < m->novl; i++) {
+        snprintf(p, sizeof p, "%s/ovl/cov_%02X_%08X.bin", m->outdir, m->ovl[i].bank, m->ovl[i].hash);
+        FILE *f = fopen(p, "wb"); if (f) { fwrite(m->ovl[i].bits, 1, 1024, f); fclose(f); }
+    }
+}
+
 static void run_cycles(pce_t *m, int budget) {
     cpu6280 *c = &m->cpu;
     while (budget > 0 && !m->stop) {
         uint32_t ph = cpu_phys(c, c->pc);
         if (m->cov) m->cov[ph >> 3] |= 1 << (ph & 7);
+        {
+            uint8_t bank = ph >> 13;
+            if (m->bank_dirty[bank] || m->cur_ovl[bank] < 0) { m->cur_ovl[bank] = ovl_lookup(m, bank); m->bank_dirty[bank] = 0; }
+            uint16_t off = ph & 0x1FFF;
+            m->ovl[m->cur_ovl[bank]].bits[off >> 3] |= 1 << (off & 7);
+        }
+        if (m->native_on && !m->trace_left) {
+            int oi = m->cur_ovl[ph >> 13];
+            int ni = m->ovl_native[oi];
+            if (ni == -2) {
+                ni = -1;
+                for (int k = 0; k < g_native_count; k++)
+                    if (g_native_table[k].bank == m->ovl[oi].bank && g_native_table[k].hash == m->ovl[oi].hash) { ni = k; break; }
+                m->ovl_native[oi] = ni;
+            }
+            if (ni >= 0 && !m->ovl_native_off[oi]) {
+                m->native_cm[ph >> 13] = g_native_table[ni].codemap;
+                m->native_cm_ovl[ph >> 13] = oi;
+                static pce_t snap, after;
+                m->native_calls++;
+                int check = m->difftest_every && (m->native_calls % m->difftest_every) == 0;
+                if (check) { snap = *m; snap.psg_log = NULL; }
+                uint32_t n0 = c->ninstr; uint16_t pc0 = c->pc;
+                FILE *pl = m->psg_log; if (check) m->psg_log = NULL;
+                int cyc = g_native_table[ni].fn(c, budget);
+                m->psg_log = pl;
+                uint32_t k = c->ninstr - n0;
+                if (k == 0 && c->pc == pc0) goto interp;   /* no progress: let the interpreter step */
+                if (check) {
+                    after = *m;
+                    *m = snap; m->psg_log = pl;
+                    for (uint32_t i = 0; i < k; i++) {
+                        /* interpreter replay without taking interrupts the native code would not take */
+                        uint8_t pend = c->irq_pending; c->irq_pending = 0;
+                        cpu_step(c);
+                        c->irq_pending |= pend;
+                    }
+                    m->diff_checks++;
+                    int bad = 0; char what[64] = "";
+                    if (c->a != after.cpu.a || c->x != after.cpu.x || c->y != after.cpu.y || c->s != after.cpu.s ||
+                        (c->p & ~F_T) != (after.cpu.p & ~F_T) || c->pc != after.cpu.pc || memcmp(c->mpr, after.cpu.mpr, 8)) { bad = 1; strcpy(what, "regs"); }
+                    else if (memcmp(m->ram, after.ram, sizeof m->ram)) { bad = 1; strcpy(what, "ram"); }
+                    else if (memcmp(m->cdram, after.cdram, sizeof m->cdram)) { bad = 1; strcpy(what, "cdram"); }
+                    else if (memcmp(m->scdram, after.scdram, sizeof m->scdram)) { bad = 1; strcpy(what, "scdram"); }
+                    else if (memcmp(m->vdc.vram, after.vdc.vram, sizeof m->vdc.vram) || memcmp(m->vdc.reg, after.vdc.reg, sizeof m->vdc.reg)) { bad = 1; strcpy(what, "vdc"); }
+                    else if (memcmp(m->cram, after.cram, sizeof m->cram)) { bad = 1; strcpy(what, "cram"); }
+                    if (bad) {
+                        m->diff_fails++;
+                        if (m->diff_fails <= 20)
+                            fprintf(m->log, "DIFF %s: start %02X:%04X n=%u native pc=%04X A=%02X X=%02X Y=%02X P=%02X S=%02X | interp pc=%04X A=%02X X=%02X Y=%02X P=%02X S=%02X\n",
+                                what, snap.cpu.mpr[pc0 >> 13], pc0, k, after.cpu.pc, after.cpu.a, after.cpu.x, after.cpu.y, after.cpu.p, after.cpu.s,
+                                c->pc, c->a, c->x, c->y, c->p, c->s);
+                    }
+                    /* keep the interpreter's result */
+                }
+                m->native_instr += k;
+                int fast = c->speed ? cyc : cyc * 4;
+                budget -= fast;
+                timer_tick(m, fast);
+                continue;
+            }
+        }
+    interp:
         if (m->trace_left > 0) {
             m->trace_left--;
             fprintf(m->log, "T %02X:%04X %02X %02X %02X  A=%02X X=%02X Y=%02X S=%02X P=%02X\n", c->mpr[c->pc >> 13], c->pc,
                     cpu_read(c, c->pc), cpu_read(c, c->pc + 1), cpu_read(c, c->pc + 2), c->a, c->x, c->y, c->s, c->p);
         }
+        uint32_t n0i = c->ninstr;
         int cyc = cpu_step(c);
+        m->interp_instr += c->ninstr - n0i;
         if (cyc < 0) { m->stop = 1; break; }
         int fast = c->speed ? cyc : cyc * 4;
         budget -= fast;
@@ -234,6 +358,20 @@ void pce_run_frame(pce_t *m) {
     m->frame++;
 }
 
+void pce_load_volatile(pce_t *m, const char *path) {
+    FILE *f = fopen(path, "r");
+    if (!f) return;
+    unsigned b, o, n = 1;
+    char line[128];
+    while (fgets(line, sizeof line, f)) {
+        if (line[0] == '#') continue;
+        n = 1;
+        if (sscanf(line, "%x:%x+%u", &b, &o, &n) >= 2 && b < 256)
+            for (unsigned i = 0; i < n && o + i < 0x2000; i++) m->volatile_map[b][o + i] = 1;
+    }
+    fclose(f);
+}
+
 int pce_init(pce_t *m, const char *disc_iso, const char *bios_rom) {
     memset(m, 0, sizeof *m);
     m->log = stderr;
@@ -244,6 +382,9 @@ int pce_init(pce_t *m, const char *disc_iso, const char *bios_rom) {
     fclose(f);
     m->disc_sectors = n / 2048;
     m->cov = calloc(1, 0x200000 / 8);
+    m->volatile_map = calloc(256, 0x2000);
+    for (int i = 0; i < 256; i++) { m->cur_ovl[i] = -1; m->bank_dirty[i] = 1; }
+    for (int i = 0; i < 4096; i++) m->ovl_native[i] = -2;
     m->cpu.read = pce_read; m->cpu.write = pce_write; m->cpu.ctx = m;
     m->cpu.trap = bios_hle_trap;
     if (bios_rom) {

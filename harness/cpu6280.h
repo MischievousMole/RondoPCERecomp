@@ -26,6 +26,7 @@ typedef struct cpu6280 {
     uint8_t irq_pending;  /* request bits, set by devices */
     int64_t cycles;       /* master cycles (7.16 MHz ticks... counted in CPU cycles x speed factor) */
     uint8_t halted;
+    uint32_t ninstr;      /* instructions executed (both cores) */
     /* host hooks */
     uint8_t (*read)(void *ctx, uint32_t phys);
     void    (*write)(void *ctx, uint32_t phys, uint8_t v);
@@ -42,5 +43,10 @@ uint8_t cpu_read(cpu6280 *c, uint16_t a);
 void cpu_write(cpu6280 *c, uint16_t a, uint8_t v);
 void cpu_push(cpu6280 *c, uint8_t v);
 uint8_t cpu_pull(cpu6280 *c);
+void cpu_adc(cpu6280 *c, uint8_t m, uint8_t *acc);
+void cpu_sbc(cpu6280 *c, uint8_t m);
+void cpu_cmp(cpu6280 *c, uint8_t r, uint8_t m);
+void cpu_interrupt(cpu6280 *c, uint16_t vec, int brk);
+int cpu_block(cpu6280 *c, uint8_t op, uint16_t s, uint16_t d, uint16_t n);
 
 #endif

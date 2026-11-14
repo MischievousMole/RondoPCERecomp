@@ -109,13 +109,14 @@ static void cd_read(pce_t *m, cpu6280 *c) {
     if (lba * 2048 + bytes > (unsigned long)m->disc_sectors * 2048) { c->a = 1; return; }
     const uint8_t *src = m->disc + lba * 2048;
     if (mode == 0 || mode == 1) {
-        for (unsigned i = 0; i < bytes; i++) cpu_write(c, addr + i, src[i]);
+        for (unsigned i = 0; i < bytes; i++) { cpu_write(c, addr + i, src[i]); if ((i & 0x1FFF) == 0 || i == bytes - 1) pce_mark_dirty(m, cpu_phys(c, addr + i) >> 13); }
     } else if (mode >= 2 && mode <= 6) {
         /* map bank BL into MPR[mode] window and fill consecutive banks */
         uint8_t bank = ZP(m, BL);
         for (unsigned i = 0; i < bytes; i++) {
             uint32_t ph = ((uint32_t)(bank + (i >> 13)) << 13) | (i & 0x1FFF);
             pce_write(m, ph, src[i]);
+            pce_mark_dirty(m, ph >> 13);
         }
         c->mpr[mode] = bank;
     } else if (mode == 0xFE || mode == 0xFF) {
@@ -159,6 +160,7 @@ static void boot(pce_t *m, cpu6280 *c) {
     for (int i = 0; i < 5; i++) c->mpr[2 + i] = 0x80 + h[8 + i];
     memset(m->ram, 0, sizeof m->ram);
     for (unsigned i = 0; i < bln * 2048u; i++) cpu_write(c, sta + i, m->disc[blk * 2048 + i]);
+    pce_mark_dirty(m, 0xF8);
     c->s = 0xFF; c->p = 0; c->speed = 1;
     c->irq_mask = 0;
     ZP(m, CRL_M) = 0x08; ZP(m, CRH_M) = 0;
@@ -198,6 +200,7 @@ int bios_hle_trap(void *ctx, cpu6280 *c) {
     }
     if (id >= NCALLS) { fprintf(m->log, "bad trap %02X\n", id); return 1; }
     m->bios_calls[id]++;
+    m->bulk_load = 1;
     /* return address of the JSR */
     uint16_t ret = (cpu_read(c, 0x2100 + (uint8_t)(c->s + 1)) | (cpu_read(c, 0x2100 + (uint8_t)(c->s + 2)) << 8)) + 1;
     static uint8_t seen[0x200000 / 8];
@@ -278,10 +281,10 @@ int bios_hle_trap(void *ctx, cpu6280 *c) {
         for (unsigned i = 0; i < n; i++) {
             uint16_t a = ad + i;
             if (mode == 0) {
-                if (id == 18) cpu_write(c, addr + i, m->adpcm[a]); else m->adpcm[a] = cpu_read(c, addr + i);
+                if (id == 18) { cpu_write(c, addr + i, m->adpcm[a]); pce_mark_dirty(m, cpu_phys(c, addr + i) >> 13); } else m->adpcm[a] = cpu_read(c, addr + i);
             } else if (mode >= 2 && mode <= 6) {
                 uint32_t ph = ((uint32_t)(ZP(m, BL) + (i >> 13)) << 13) | (i & 0x1FFF);
-                if (id == 18) pce_write(m, ph, m->adpcm[a]); else m->adpcm[a] = pce_read(m, ph);
+                if (id == 18) { pce_write(m, ph, m->adpcm[a]); pce_mark_dirty(m, ph >> 13); } else m->adpcm[a] = pce_read(m, ph);
             } else {                                                    /* VRAM, word address in bx */
                 uint16_t *w = &m->vdc.vram[(addr + i / 2) & 0x7FFF];
                 if (id == 18) *w = (i & 1) ? ((*w & 0xFF) | (m->adpcm[a] << 8)) : ((*w & 0xFF00) | m->adpcm[a]);
@@ -301,5 +304,6 @@ int bios_hle_trap(void *ctx, cpu6280 *c) {
         if (m->verbose && first) fprintf(m->log, "  (not implemented: %s)\n", names[id]);
         break;
     }
+    m->bulk_load = 0;
     return 0;
 }
