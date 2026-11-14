@@ -28,6 +28,7 @@ int main(int argc, char **argv) {
     if (pce_init(&M, disc, bios)) return 1;
     M.verbose = verbose;
     M.outdir = out;
+    { extern const char *bram_dir; static char bd[512]; snprintf(bd, sizeof bd, "%s/bram", out); bram_dir = bd; }
     if (getenv("PCE_NATIVE")) M.native_on = 1;
     if (tracks && pce_load_toc(&M, tracks) < 0) fprintf(stderr, "no toc in %s\n", tracks);
     pce_load_volatile(&M, getenv("PCE_VOLATILE") ? getenv("PCE_VOLATILE") : "tools/volatile.txt");
@@ -65,6 +66,15 @@ int main(int argc, char **argv) {
             M.joy_buttons = (f & 1) ? (rmask & 0xF0) : rmask;
         }
         if (getenv("PCE_TRACE_AT") && f == atol(getenv("PCE_TRACE_AT"))) M.trace_left = getenv("PCE_TRACE_N") ? atol(getenv("PCE_TRACE_N")) : 200000;
+        if (getenv("PCE_POKE")) {
+            /* "from-to:addr=val,..." logical RAM addresses ($2000-$3FFF) */
+            const char *p = getenv("PCE_POKE");
+            long a0, a1; unsigned ad, val; int n;
+            while (sscanf(p, "%ld-%ld:%x=%x%n", &a0, &a1, &ad, &val, &n) == 4) {
+                if (f >= a0 && f <= a1 && ad >= 0x2000 && ad < 0x4000) M.ram[ad - 0x2000] = val;
+                p += n; if (*p == ',') p++; else break;
+            }
+        }
         pce_run_frame(&M);
         if (getenv("PCE_DUMP") && f == atol(getenv("PCE_DUMP"))) {
             snprintf(path, sizeof path, "%s/mem_%06ld.bin", out, f);

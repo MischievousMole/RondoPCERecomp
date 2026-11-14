@@ -27,3 +27,14 @@ ex_rnd, ex_scrmod, ex_imode, ex_colorcmd, ex_dotmod, ex_bcdbin, ma_mul8u/mul8s/d
 - ex_getfnt: prologue text uses the System Card kanji font -> needs the real BIOS ROM (or a font dump).
 - Raster split a few lines off in the carriage cutscene (VDC timing / BYR latch).
 - CD-DA and ADPCM audio not rendered yet (calls are logged).
+
+## Save record ("X DRACULA X", 144 bytes) - slot 1 layout found so far
+- +$01 slot used; +$15..$1C name (char codes, "A" = $21).
+- +$02..$05 and +$07..$0A: stage progress (main / alternate route). Setting one of them selects the stage
+  Game Start loads (e.g. $02=1 -> castle bridge, music track 9; $02=2 -> track 10; $03=1 -> 13; $03=2 -> 14).
+- +$1F..$21 money (BCD). +$24 = 01 after the Prologue.
+- Coverage warps: copy tools/save_template.sav into OUT/bram, patch one byte, route "7600:08,7606:00,7900:01,7904:00,8100:01,8104:00".
+
+## Coverage 2026-11-13
+65 bank versions, 41,695 executed instruction addresses (Stage 0-1 random play + 16 stage-save warps).
+Difftest on 8 stage saves x 30,000 frames: 423,762 checks, 0 failures, 99.9-100% native.
