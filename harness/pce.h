@@ -4,6 +4,7 @@
 #include <stdint.h>
 #include <stdio.h>
 #include "cpu6280.h"
+#include "audio.h"
 
 #define LINES_PER_FRAME 263
 #define CPU_CYC_PER_LINE 455   /* 1365 master clocks / 3 */
@@ -55,6 +56,7 @@ typedef struct pce {
     long bios_calls[64];
     int stop;
     long trace_left;
+    audio_t audio; FILE *wav; long wav_samples;
     /* overlay-aware coverage: banks are re-identified after bulk loads */
     uint32_t bank_hash[256];
     uint8_t  bank_dirty[256];

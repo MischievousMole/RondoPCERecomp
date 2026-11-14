@@ -260,8 +260,8 @@ int bios_hle_trap(void *ctx, cpu6280 *c) {
         RAMB(m, 0x222D) = now & ~old;
         break;
     }
-    case 16: case 22: m->adpcm_playing = 0; c->a = 0; break;            /* ad_reset / ad_stop */
-    case 23: c->a = m->adpcm_playing ? 1 : 0; c->x = c->a; break;      /* ad_stat */
+    case 16: case 22: adpcm_stop(&m->audio); c->a = 0; break;          /* ad_reset / ad_stop */
+    case 23: c->a = m->audio.ad_on ? 1 : 0; c->x = c->a; break;        /* ad_stat */
     case 17: {                                                          /* ad_trans: CD -> ADPCM RAM */
         uint32_t lba = (ZP(m, CL) << 16) | (ZP(m, CH) << 8) | ZP(m, DL);
         uint16_t dst = ZP(m, DH) ? m->adpcm_wr : (ZP(m, BL) | (ZP(m, BH) << 8));
@@ -297,6 +297,7 @@ int bios_hle_trap(void *ctx, cpu6280 *c) {
     }
     case 7: case 11: case 12: case 13: c->a = 0; break;                 /* cd_search, cd_dinfo, cd_contnts, cd_subrd */
     case 20: case 21:                                                   /* ad_play / ad_cplay */
+        if (id == 20) adpcm_play(&m->audio, m->adpcm, ZP(m, BL) | ZP(m, BH) << 8, ZP(m, AL) | ZP(m, AH) << 8, ZP(m, DH));
         if (m->verbose) fprintf(m->log, "  %s addr=%04X len=%04X rate=%02X mode=%02X\n", names[id],
             ZP(m, BL) | ZP(m, BH) << 8, ZP(m, AL) | ZP(m, AH) << 8, ZP(m, DH), ZP(m, DL));
         c->a = 0; break;

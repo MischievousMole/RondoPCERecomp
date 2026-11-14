@@ -165,6 +165,7 @@ void pce_write(void *ctx, uint32_t a, uint8_t v) {
         case 0x0800: {
             int r = off & 0x0F;
             if (m->psg_log) fprintf(m->psg_log, "%ld %d %X %02X\n", m->frame, m->line, r, v);
+            psg_write(&m->audio, r, v);
             if (r == 0) m->psg_ch = v & 7;
             else if (r == 1) m->psg_global[0] = v;
             else if (r == 8 || r == 9) m->psg_global[r - 7] = v;
@@ -342,6 +343,15 @@ void pce_run_frame(pce_t *m) {
         if (m->line >= v->disp_start && m->line < v->disp_end)
             render_line(m, m->line - v->disp_start, v->bg_y);
         run_cycles(m, CPU_CYC_PER_LINE);
+        {
+            /* audio: 48 kHz / 15734.26 Hz lines */
+            m->audio.sample_frac += 48000.0 / 15734.26;
+            int n = (int)m->audio.sample_frac;
+            m->audio.sample_frac -= n;
+            int16_t buf[16];
+            audio_render(&m->audio, buf, n);
+            if (m->wav) { fwrite(buf, 4, n, m->wav); m->wav_samples += n; }
+        }
         v->line_ctr++;
         v->bg_y++;
         if (m->line == v->disp_end) {
@@ -383,6 +393,7 @@ int pce_init(pce_t *m, const char *disc_iso, const char *bios_rom) {
     m->disc_sectors = n / 2048;
     m->cov = calloc(1, 0x200000 / 8);
     m->volatile_map = calloc(256, 0x2000);
+    audio_reset(&m->audio); m->audio.ad_vol = 1.0f;
     for (int i = 0; i < 256; i++) { m->cur_ovl[i] = -1; m->bank_dirty[i] = 1; }
     for (int i = 0; i < 4096; i++) m->ovl_native[i] = -2;
     m->cpu.read = pce_read; m->cpu.write = pce_write; m->cpu.ctx = m;

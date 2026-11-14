@@ -35,6 +35,7 @@ int main(int argc, char **argv) {
     char path[512];
     snprintf(path, sizeof path, "%s/psg.log", out);
     M.psg_log = fopen(path, "w");
+    if (getenv("PCE_WAV")) { M.wav = fopen(getenv("PCE_WAV"), "wb"); char hdr[44] = {0}; fwrite(hdr, 1, 44, M.wav); }
     cpu_reset(&M.cpu);
     for (long f = 0; f < frames && !M.stop; f++) {
         if (script) {
@@ -70,6 +71,8 @@ int main(int argc, char **argv) {
             fclose(fd);
             snprintf(path, sizeof path, "%s/vram_%06ld.bin", out, f);
             fd = fopen(path, "wb"); fwrite(M.vdc.vram, 2, 0x8000, fd); fclose(fd);
+            snprintf(path, sizeof path, "%s/adpcm_%06ld.bin", out, f);
+            fd = fopen(path, "wb"); fwrite(M.adpcm, 1, 0x10000, fd); fclose(fd);
         }
         if (d0 >= 0 && f >= d0 && f <= d1 && (f - d0) % ds == 0) {
             snprintf(path, sizeof path, "%s/frame_%06ld.ppm", out, f);
@@ -90,5 +93,13 @@ int main(int argc, char **argv) {
     for (int i = 0; i < 20; i++) fprintf(stderr, " %02X=%04X", i, M.vdc.reg[i]);
     fprintf(stderr, " st=%02X irq_m=%02X\n", M.vdc.status, M.ram[0xF5]);
     if (M.psg_log) fclose(M.psg_log);
+    if (M.wav) {
+        uint32_t data = M.wav_samples * 4;
+        uint8_t h[44] = { 'R','I','F','F', 0,0,0,0, 'W','A','V','E', 'f','m','t',' ', 16,0,0,0, 1,0, 2,0,
+                          0x80,0xBB,0,0, 0x00,0xEE,0x02,0, 4,0, 16,0, 'd','a','t','a', 0,0,0,0 };
+        uint32_t riff = data + 36;
+        memcpy(h + 4, &riff, 4); memcpy(h + 40, &data, 4);
+        fseek(M.wav, 0, SEEK_SET); fwrite(h, 1, 44, M.wav); fclose(M.wav);
+    }
     return 0;
 }
