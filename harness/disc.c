@@ -25,9 +25,10 @@ static int disc_fetch(void *ctx, long sample, int16_t *lr) {
         if (frame < t->start || frame >= t->start + t->frames) continue;
         if (!t->audio) return 0;
         if (!t->data) {
-            t->data = malloc(t->frames * 2352);
-            fseek(g_img, t->start * 2352, SEEK_SET);
-            if (fread(t->data, 2352, t->frames, g_img) != (size_t)t->frames) {}
+            t->data = calloc(t->frames, 2352);
+            int ok = fseek(g_img, t->start * 2352, SEEK_SET) == 0;
+            size_t got = ok ? fread(t->data, 2352, t->frames, g_img) : 0;
+            fprintf(m->log, "cd-da: load track %d (%ld frames from %ld): seek %s, read %zu frames\n", t->track, t->frames, t->start, ok ? "ok" : "FAILED", got);
         }
         long off = (sample - t->start * 588) * 4;
         lr[0] = (int16_t)(t->data[off] | t->data[off + 1] << 8);
