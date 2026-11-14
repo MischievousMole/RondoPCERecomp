@@ -5,6 +5,8 @@
 #define FB_W 512
 #define FB_H 242
 uint32_t g_fb[FB_W * FB_H];
+uint8_t g_layer[FB_W * FB_H];   /* 0 backdrop, 1 BG tile, 2 sprite */
+int g_dotclk;
 int g_fb_w = 256, g_fb_h = 224;
 
 static uint32_t rgb(uint16_t c) {
@@ -69,19 +71,21 @@ void render_line(pce_t *m, int y, int bg_y) {
         }
     }
     uint32_t *out = &g_fb[y * FB_W];
+    uint8_t *lay = &g_layer[y * FB_W];
+    g_dotclk = m->vce_ctrl & 3;
     for (int x = 0; x < w; x++) {
-        uint16_t col;
-        if (spr[x] && (sprpri[x] || !pix[x])) col = m->cram[256 + spr[x]];
-        else if (pix[x]) col = m->cram[pal[x] * 16 + pix[x]];
-        else col = m->cram[0];
-        out[x] = rgb(col);
+        uint16_t col; uint8_t l;
+        if (spr[x] && (sprpri[x] || !pix[x])) { col = m->cram[256 + spr[x]]; l = 2; }
+        else if (pix[x]) { col = m->cram[pal[x] * 16 + pix[x]]; l = 1; }
+        else { col = m->cram[0]; l = 0; }
+        out[x] = rgb(col); lay[x] = l;
     }
 }
 
 void render_blank(pce_t *m, int y) {
     if (y < 0 || y >= FB_H) return;
     uint32_t c = rgb(m->cram[0]);
-    for (int x = 0; x < FB_W; x++) g_fb[y * FB_W + x] = c;
+    for (int x = 0; x < FB_W; x++) { g_fb[y * FB_W + x] = c; g_layer[y * FB_W + x] = 0; }
 }
 
 int render_save_ppm(const char *path, int h) {

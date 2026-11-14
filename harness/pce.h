@@ -93,7 +93,9 @@ void render_line(pce_t *m, int y, int bg_y);
 void render_blank(pce_t *m, int y);
 int render_save_ppm(const char *path, int h);
 extern uint32_t g_fb[];
-extern int g_fb_w, g_fb_h;
+extern int g_fb_w, g_fb_h, g_dotclk;
+extern uint8_t g_layer[];
+#define FB_STRIDE 512
 
 /* bios_hle.c */
 void bios_hle_install(pce_t *m);

@@ -90,6 +90,15 @@ int main(int argc, char **argv) {
             snprintf(path, sizeof path, "%s/adpcm_%06ld.bin", out, f);
             fd = fopen(path, "wb"); fwrite(M.adpcm, 1, 0x10000, fd); fclose(fd);
         }
+        if (getenv("PCE_SHOT") && f == atol(getenv("PCE_SHOT"))) {
+            snprintf(path, sizeof path, "%s/shot_%06ld.raw", out, f);
+            FILE *fs = fopen(path, "wb");
+            int hdr[3] = { g_fb_w, g_fb_h, g_dotclk };
+            fwrite(hdr, sizeof hdr, 1, fs);
+            for (int y = 0; y < g_fb_h; y++) fwrite(&g_fb[y * FB_STRIDE], 4, g_fb_w, fs);
+            for (int y = 0; y < g_fb_h; y++) fwrite(&g_layer[y * FB_STRIDE], 1, g_fb_w, fs);
+            fclose(fs);
+        }
         if (d0 >= 0 && f >= d0 && f <= d1 && (f - d0) % ds == 0) {
             snprintf(path, sizeof path, "%s/frame_%06ld.ppm", out, f);
             render_save_ppm(path, g_fb_h);
