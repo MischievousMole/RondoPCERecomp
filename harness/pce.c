@@ -252,6 +252,7 @@ static void run_cycles(pce_t *m, int budget) {
             uint16_t off = ph & 0x1FFF;
             m->ovl[m->cur_ovl[bank]].bits[off >> 3] |= 1 << (off & 7);
         }
+        if (m->real_bios && bios_real_intercept(m, c)) { budget -= 8; timer_tick(m, 8); continue; }
         if (m->native_on && !m->trace_left) {
             int oi = m->cur_ovl[ph >> 13];
             int ni = m->ovl_native[oi];
@@ -440,9 +441,13 @@ int pce_init(pce_t *m, const char *disc_iso, const char *bios_rom) {
     if (bios_rom) {
         f = fopen(bios_rom, "rb");
         if (!f) { perror(bios_rom); return -1; }
-        size_t r = fread(m->rom, 1, sizeof m->rom, f); fclose(f);
-        if (r == 0x40000 + 512 || (r & 0x3FF) == 512) memmove(m->rom, m->rom + 512, r - 512);
+        static uint8_t buf[0x40000 + 512];
+        size_t r = fread(buf, 1, sizeof buf, f); fclose(f);
+        size_t skip = (r & 0x3FF) == 512 ? 512 : 0;   /* copier header */
+        memset(m->rom, 0xFF, sizeof m->rom);
+        memcpy(m->rom, buf + skip, r - skip > sizeof m->rom ? sizeof m->rom : r - skip);
         m->real_bios = 1;
+        bios_real_install(m);
     } else {
         bios_hle_install(m);
     }

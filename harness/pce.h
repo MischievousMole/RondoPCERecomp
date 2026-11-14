@@ -99,5 +99,7 @@ extern int g_fb_w, g_fb_h;
 void bios_hle_install(pce_t *m);
 int  bios_hle_trap(void *ctx, cpu6280 *c);
 void bios_vblank(pce_t *m);
+void bios_real_install(pce_t *m);
+int  bios_real_intercept(pce_t *m, cpu6280 *c);
 
 #endif

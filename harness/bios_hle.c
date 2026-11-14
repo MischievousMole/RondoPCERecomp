@@ -63,9 +63,10 @@ void bios_hle_install(pce_t *m) {
 static uint16_t ram16(pce_t *m, uint16_t a) { return RAMB(m, a) | (RAMB(m, a + 1) << 8); }
 
 /* call a user routine (ending in RTS) from interrupt context, then PLY/PLX/PLA/RTI */
+static uint16_t g_hookret = STUB_BASE + 0x80;
 static void call_hook(pce_t *m, cpu6280 *c, uint16_t target) {
     cpu_push(c, c->a); cpu_push(c, c->x); cpu_push(c, c->y);
-    uint16_t ret = STUB_BASE + 0x80 - 1;
+    uint16_t ret = g_hookret - 1;
     cpu_push(c, ret >> 8); cpu_push(c, ret & 0xFF);
     c->pc = target;
 }
@@ -217,10 +218,60 @@ static void boot(pce_t *m, cpu6280 *c) {
     c->pc = jmp;
 }
 
+static int bios_hle_exec(pce_t *m, cpu6280 *c, uint8_t id);
+
 int bios_hle_trap(void *ctx, cpu6280 *c) {
     pce_t *m = ctx;
     uint8_t id = cpu_read(c, c->pc);
     c->pc++;
+    return bios_hle_exec(m, c, id);
+}
+
+/* Real System Card mode: calls listed here run the ROM's own code; everything else is intercepted. */
+static const uint8_t passthrough[] = { 32, 60, 61, 63, 64, 65, 66, 67, 68, 69, 70, 71, 72, 73, 75 };
+#define MAGIC_PC 0xFFF2
+static int16_t icept[0x2000];
+
+void bios_real_install(pce_t *m) {
+    for (int i = 0; i < 0x2000; i++) icept[i] = -1;
+    for (int i = 0; i < NCALLS; i++) {
+        int pass = 0;
+        for (unsigned k = 0; k < sizeof passthrough; k++) if (passthrough[k] == i) pass = 1;
+        if (!pass) icept[i * 3] = i;
+    }
+    static const int vec_ids[5] = { STUB_IRQ2, STUB_IRQ1, STUB_TIMER, STUB_NMI, STUB_RESET };
+    for (int i = 0; i < 5; i++) {
+        uint16_t v = m->rom[0x1FF6 + i * 2] | (m->rom[0x1FF7 + i * 2] << 8);
+        icept[v & 0x1FFF] = vec_ids[i];
+    }
+    g_hookret = 0xFFF0;
+    icept[0x1FF0] = STUB_HOOKRET;
+    H.rnd = 0x1234567;
+}
+
+/* called before every instruction in real-BIOS mode; returns 1 if it handled the PC */
+int bios_real_intercept(pce_t *m, cpu6280 *c) {
+    if (c->mpr[c->pc >> 13] != 0) return 0;
+    int id = icept[c->pc & 0x1FFF];
+    if (id < 0) return 0;
+    uint16_t entry = c->pc;
+    if (id == STUB_HOOKRET) {        /* PLY PLX PLA RTI */
+        c->y = cpu_pull(c); c->x = cpu_pull(c); c->a = cpu_pull(c);
+        c->p = cpu_pull(c); uint16_t l = cpu_pull(c); c->pc = l | (cpu_pull(c) << 8);
+        return 1;
+    }
+    c->pc = MAGIC_PC;
+    bios_hle_exec(m, c, id);
+    if (c->pc == MAGIC_PC) {
+        if (id >= STUB_IRQ2) { c->p = cpu_pull(c); uint16_t l = cpu_pull(c); c->pc = l | (cpu_pull(c) << 8); }
+        else { uint16_t l = cpu_pull(c); c->pc = (l | (cpu_pull(c) << 8)) + 1; }
+    } else if (c->pc == MAGIC_PC - 2) {
+        c->pc = entry;               /* ex_vsync: retry after the next interrupt */
+    }
+    return 1;
+}
+
+static int bios_hle_exec(pce_t *m, cpu6280 *c, uint8_t id) {
     if (id >= STUB_IRQ2) {
         switch (id) {
         case STUB_RESET: boot(m, c); return 0;
