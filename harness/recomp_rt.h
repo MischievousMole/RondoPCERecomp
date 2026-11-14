@@ -23,5 +23,7 @@ typedef struct native_ovl {
 } native_ovl_t;
 extern const native_ovl_t g_native_table[];
 extern const int g_native_count;
+typedef struct { uint8_t bank; uint16_t off, n; } volatile_ent_t;
+extern const volatile_ent_t g_volatile[];
 
 #endif

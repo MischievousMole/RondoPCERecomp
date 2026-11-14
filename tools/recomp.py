@@ -296,6 +296,13 @@ def main():
             f.write(f'  {{ 0x{bank:02X}, 0x{h:08X}u, {fn}, (const uint8_t[]){{' + ','.join(str(x) for x in cm) + '} },\n')
         f.write('};\n')
         f.write(f'const int g_native_count = {len(table)};\n')
+        f.write('const volatile_ent_t g_volatile[] = {\n')
+        for line in open(os.path.join(os.path.dirname(__file__), 'volatile.txt')):
+            line = line.split('#')[0].strip()
+            if not line: continue
+            b, rest = line.split(':'); o, n = (rest.split('+') + ['1'])[:2]
+            f.write(f'  {{ 0x{b}, 0x{o}, {n} }},\n')
+        f.write('  { 0, 0, 0 }\n};\n')
     print(f'{len(table)} overlays, {total} instructions translated, {tb} bails')
 
 if __name__ == '__main__':

@@ -4,6 +4,11 @@
 #include <string.h>
 #include <stdlib.h>
 #include "pce.h"
+#ifdef _WIN32
+#include <direct.h>
+#else
+#include <sys/stat.h>
+#endif
 
 static const char *names[] = {
  "cd_boot","cd_reset","cd_base","cd_read","cd_seek","cd_exec","cd_play","cd_search","cd_pause","cd_stat",
@@ -93,7 +98,11 @@ static int bram_io(pce_t *m, cpu6280 *c, int write) {
     }
     for (unsigned i = 0; i < len && off + i < sizeof data; i++) data[off + i] = cpu_read(c, buf + i);
     if (off + len > have) have = off + len;
-    char cmd[300]; snprintf(cmd, sizeof cmd, "mkdir -p %s", bram_dir); if (system(cmd)) {}
+#ifdef _WIN32
+    _mkdir(bram_dir);
+#else
+    mkdir(bram_dir, 0755);
+#endif
     f = fopen(p, "wb"); if (!f) return 2;
     fwrite(data, 1, have, f); fclose(f);
     return 0;

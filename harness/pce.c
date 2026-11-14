@@ -3,12 +3,14 @@
 #include <string.h>
 #include "pce.h"
 #include "recomp_rt.h"
+#include "disc.h"
 
 uint32_t g_ovl_epoch;
 #ifndef NO_NATIVE_TABLE
 #else
 const native_ovl_t g_native_table[1];
 const int g_native_count = 0;
+const volatile_ent_t g_volatile[] = { { 0x6C, 0x0000, 3 }, { 0x6B, 0x1E00, 1 }, { 0xF8, 0x0000, 0x2000 }, { 0, 0, 0 } };
 #endif
 
 static const int vram_inc[4] = { 1, 32, 64, 128 };
@@ -352,6 +354,7 @@ void pce_run_frame(pce_t *m) {
             int16_t buf[16];
             audio_render(&m->audio, buf, n);
             if (m->wav) { fwrite(buf, 4, n, m->wav); m->wav_samples += n; }
+            if (m->audio_cb) m->audio_cb(m, buf, n);
         }
         v->line_ctr++;
         v->bg_y++;
@@ -425,14 +428,23 @@ int pce_load_toc(pce_t *m, const char *dir) {
 int pce_init(pce_t *m, const char *disc_iso, const char *bios_rom) {
     memset(m, 0, sizeof *m);
     m->log = stderr;
-    FILE *f = fopen(disc_iso, "rb");
-    if (!f) { perror(disc_iso); return -1; }
-    fseek(f, 0, SEEK_END); long n = ftell(f); fseek(f, 0, SEEK_SET);
-    m->disc = malloc(n); if (fread(m->disc, 1, n, f) != (size_t)n) { fclose(f); return -1; }
-    fclose(f);
-    m->disc_sectors = n / 2048;
+    FILE *f;
+    size_t dl = strlen(disc_iso);
+    if (dl > 4 && (!strcmp(disc_iso + dl - 4, ".cue") || !strcmp(disc_iso + dl - 4, ".CUE"))) {
+        char err[512];
+        if (disc_open(m, disc_iso, err, sizeof err)) { fprintf(stderr, "%s\n", err); snprintf(m->error, sizeof m->error, "%s", err); return -1; }
+    } else {
+        f = fopen(disc_iso, "rb");
+        if (!f) { perror(disc_iso); return -1; }
+        fseek(f, 0, SEEK_END); long n = ftell(f); fseek(f, 0, SEEK_SET);
+        m->disc = malloc(n); if (fread(m->disc, 1, n, f) != (size_t)n) { fclose(f); return -1; }
+        fclose(f);
+        m->disc_sectors = n / 2048;
+    }
     m->cov = calloc(1, 0x200000 / 8);
     m->volatile_map = calloc(256, 0x2000);
+    for (int i = 0; g_volatile[i].n; i++)
+        for (int k = 0; k < g_volatile[i].n; k++) m->volatile_map[g_volatile[i].bank][g_volatile[i].off + k] = 1;
     audio_reset(&m->audio); m->audio.ad_vol = 1.0f;
     for (int i = 0; i < 256; i++) { m->cur_ovl[i] = -1; m->bank_dirty[i] = 1; }
     for (int i = 0; i < 4096; i++) m->ovl_native[i] = -2;

@@ -56,6 +56,8 @@ typedef struct pce {
     long bios_calls[64];
     int stop;
     long trace_left;
+    void (*audio_cb)(struct pce *m, const int16_t *buf, int n);
+    char error[512];
     audio_t audio; FILE *wav; long wav_samples;
     struct toc_ent { int track, audio; long start, frames; uint8_t *data; } toc[100];
     int ntoc, cd_track;

@@ -1,0 +1,21 @@
+#!/bin/sh
+# build_player.sh linux|windows  -> build/player/<target>/
+set -e
+cd "$(dirname "$0")"
+python3 - <<'PY'
+def cstr(p):
+    return '"' + open(p).read().replace('\\', '\\\\').replace('"', '\\"').replace('\n', '\\n"\n"') + '"'
+open('shaders_gen.h', 'w').write('static const char SHADER_VERT[] = ' + cstr('../shaders/rondo_video.vert') + ';\nstatic const char SHADER_FRAG[] = ' + cstr('../shaders/rondo_video.frag') + ';\n')
+PY
+SRC="player.c pce.c cpu6280.c bios_hle.c render.c audio.c video.c disc.c native/*.c"
+T=${1:-linux}
+OUT=../build/player/$T; mkdir -p $OUT
+if [ "$T" = windows ]; then
+  SDL=${SDL_MINGW:-$HOME/rondo/third_party/SDL2-2.30.9/x86_64-w64-mingw32}
+  x86_64-w64-mingw32-gcc -O2 -w -I$SDL/include/SDL2 -Dmain=SDL_main $SRC -o $OUT/RondoRecomp.exe \
+    -L$SDL/lib -static -lmingw32 -lSDL2main -lSDL2 -mwindows -lsetupapi -limm32 -lversion -lwinmm -lole32 -loleaut32 \
+    -lgdi32 -luuid -lcfgmgr32 -lopengl32 -lm -lpthread
+else
+  gcc -O2 -w $(sdl2-config --cflags) $SRC -o $OUT/rondo $(sdl2-config --libs) -lGL -lm -lpthread
+fi
+ls -la $OUT
