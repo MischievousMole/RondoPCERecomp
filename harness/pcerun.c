@@ -15,12 +15,13 @@ int main(int argc, char **argv) {
     if (argc < 4) { fprintf(stderr, "usage: pcerun DISC.iso OUTDIR FRAMES [-b bios] [-d a:b:s] [-i script] [-v]\n"); return 1; }
     const char *disc = argv[1], *out = argv[2]; long frames = atol(argv[3]);
     unsigned rseed = 0; long rstart = -1; uint32_t rs = 0; uint8_t rmask = 0; int rhold = 0;
-    const char *bios = NULL, *script = NULL; long d0 = -1, d1 = -1, ds = 1; int verbose = 0;
+    const char *bios = NULL, *script = NULL, *tracks = NULL; long d0 = -1, d1 = -1, ds = 1; int verbose = 0;
     for (int i = 4; i < argc; i++) {
         if (!strcmp(argv[i], "-b") && i + 1 < argc) bios = argv[++i];
         else if (!strcmp(argv[i], "-d") && i + 1 < argc) sscanf(argv[++i], "%ld:%ld:%ld", &d0, &d1, &ds);
         else if (!strcmp(argv[i], "-i") && i + 1 < argc) script = argv[++i];
         else if (!strcmp(argv[i], "-r") && i + 1 < argc) sscanf(argv[++i], "%u:%ld", &rseed, &rstart);
+        else if (!strcmp(argv[i], "-t") && i + 1 < argc) tracks = argv[++i];
         else if (!strcmp(argv[i], "-v")) verbose = 1;
         else if (!strcmp(argv[i], "-vv")) verbose = 2;
     }
@@ -28,6 +29,7 @@ int main(int argc, char **argv) {
     M.verbose = verbose;
     M.outdir = out;
     if (getenv("PCE_NATIVE")) M.native_on = 1;
+    if (tracks && pce_load_toc(&M, tracks) < 0) fprintf(stderr, "no toc in %s\n", tracks);
     pce_load_volatile(&M, getenv("PCE_VOLATILE") ? getenv("PCE_VOLATILE") : "tools/volatile.txt");
     if (getenv("PCE_DIFFTEST")) M.difftest_every = atoi(getenv("PCE_DIFFTEST"));
     { char cmd[600]; snprintf(cmd, sizeof cmd, "mkdir -p '%s/ovl'", out); if (system(cmd)) {} }

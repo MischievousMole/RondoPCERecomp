@@ -98,6 +98,52 @@ static int bram_io(pce_t *m, cpu6280 *c, int write) {
     return 0;
 }
 
+static int bcd(uint8_t v) { return (v >> 4) * 10 + (v & 15); }
+static long msf_frame(uint8_t mm, uint8_t ss, uint8_t ff) { return ((long)bcd(mm) * 60 + bcd(ss)) * 75 + bcd(ff) - 150; }
+static long track_frame(pce_t *m, int track, int end) {
+    for (int i = 0; i < m->ntoc; i++) if (m->toc[i].track == track) return m->toc[i].start;
+    if (end && m->ntoc) return m->toc[m->ntoc - 1].start + m->toc[m->ntoc - 1].frames;
+    return -1;
+}
+static uint8_t tobcd(int v) { return (uint8_t)(((v / 10) << 4) | (v % 10)); }
+
+static void cd_play(pce_t *m, cpu6280 *c) {
+    uint8_t st = ZP(m, BH), et = ZP(m, DH);
+    long s, e;
+    switch (st & 0xC0) {
+    case 0x00: s = (ZP(m, AL) << 16) | (ZP(m, AH) << 8) | ZP(m, BL); break;
+    case 0x40: s = msf_frame(ZP(m, AL), ZP(m, AH), ZP(m, BL)); break;
+    default:   s = track_frame(m, bcd(ZP(m, AL)), 0); break;
+    }
+    switch (et & 0xC0) {
+    case 0x00: e = (ZP(m, CL) << 16) | (ZP(m, CH) << 8) | ZP(m, DL); break;
+    case 0x40: e = msf_frame(ZP(m, CL), ZP(m, CH), ZP(m, DL)); break;
+    case 0x80: e = track_frame(m, bcd(ZP(m, CL)), 1); break;
+    default:   e = track_frame(m, 999, 1); break;
+    }
+    int mode = et & 0x0F;
+    int track = 0;
+    for (int i = 0; i < m->ntoc; i++) if (s >= m->toc[i].start && s < m->toc[i].start + m->toc[i].frames) track = m->toc[i].track;
+    if (m->verbose) fprintf(m->log, "  cd_play frames %ld-%ld (track %d) mode %d\n", s, e, track, mode);
+    if (s >= 0 && e > s && mode != 0) cdda_play(&m->audio, s, e, mode == 1);
+    m->cd_track = track;
+    c->a = 0;
+}
+
+static void cd_subq(pce_t *m, cpu6280 *c) {
+    uint16_t a = ZP(m, BL) | (ZP(m, BH) << 8);
+    audio_t *au = &m->audio;
+    long fr = (long)(au->cd_pos / 588);
+    int track = 0; long tstart = 0;
+    for (int i = 0; i < m->ntoc; i++) if (fr >= m->toc[i].start && fr < m->toc[i].start + m->toc[i].frames) { track = m->toc[i].track; tstart = m->toc[i].start; }
+    long rel = fr - tstart, ab = fr + 150;
+    uint8_t q[10] = { au->cd_on ? 0 : 3, 0x01, tobcd(track), 0x01,
+                      tobcd(rel / 4500), tobcd(rel / 75 % 60), tobcd(rel % 75),
+                      tobcd(ab / 4500), tobcd(ab / 75 % 60), tobcd(ab % 75) };
+    for (int i = 0; i < 10; i++) cpu_write(c, a + i, q[i]);
+    c->a = 0;
+}
+
 static void cd_read(pce_t *m, cpu6280 *c) {
     uint32_t lba = (ZP(m, CL) << 16) | (ZP(m, CH) << 8) | ZP(m, DL);
     uint8_t mode = ZP(m, DH);
@@ -214,9 +260,14 @@ int bios_hle_trap(void *ctx, cpu6280 *c) {
     vdc_t *v = &m->vdc;
     switch (id) {
     case 3:  cd_read(m, c); break;                                  /* cd_read */
-    case 1: case 2: case 4: case 8: case 9: case 15: c->a = 0; break;
-    case 6:  c->a = 0; break;                                       /* cd_play (logged) */
-    case 10: { uint16_t a = ZP(m, BL) | (ZP(m, BH) << 8); for (int i = 0; i < 10; i++) cpu_write(c, a + i, 0); cpu_write(c, a, 3); c->a = 0; break; }
+    case 8: m->audio.cd_on = 0; c->a = 0; break;                    /* cd_pause */
+    case 15:                                                        /* cd_fade: A = 0 restore, 8/C fade out (6 s / 2.5 s) */
+        if (c->a == 0) { m->audio.cd_vol = 1.0f; m->audio.cd_fade = 0; m->audio.ad_vol = 1.0f; }
+        else m->audio.cd_fade = -1.0f / (48000.0f * ((c->a & 4) ? 2.5f : 6.0f));
+        c->a = 0; break;
+    case 1: case 2: case 4: case 9: c->a = 0; break;
+    case 6:  cd_play(m, c); break;                                  /* cd_play */
+    case 10: cd_subq(m, c); break;
     case 30: c->x = 3; c->y = 0; c->a = 0; break;                  /* ex_getver */
     case 31: { uint8_t n = c->a & 7; RAMB(m, 0x2200 + n * 2) = c->x; RAMB(m, 0x2201 + n * 2) = c->y; break; } /* ex_setvec */
     case 74: c->a = 0x68; c->x = 0x18; c->p &= ~F_C; break;        /* ex_memopen */

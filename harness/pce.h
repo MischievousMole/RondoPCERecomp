@@ -57,6 +57,9 @@ typedef struct pce {
     int stop;
     long trace_left;
     audio_t audio; FILE *wav; long wav_samples;
+    struct toc_ent { int track, audio; long start, frames; uint8_t *data; } toc[100];
+    int ntoc, cd_track;
+    char tracks_dir[400];
     /* overlay-aware coverage: banks are re-identified after bulk loads */
     uint32_t bank_hash[256];
     uint8_t  bank_dirty[256];
@@ -78,6 +81,7 @@ typedef struct pce {
 void pce_mark_dirty(pce_t *m, uint8_t bank);
 void pce_save_coverage(pce_t *m);
 void pce_load_volatile(pce_t *m, const char *path);
+int pce_load_toc(pce_t *m, const char *dir);
 
 int  pce_init(pce_t *m, const char *disc_iso, const char *bios_rom);
 void pce_run_frame(pce_t *m);

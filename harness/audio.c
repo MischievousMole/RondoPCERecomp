@@ -81,6 +81,12 @@ static int adpcm_next(audio_t *a) {
     return a->ad_sig;
 }
 
+void cdda_play(audio_t *a, long start_frame, long end_frame, int repeat) {
+    a->cd_start = start_frame * 588; a->cd_end = end_frame * 588;
+    a->cd_pos = a->cd_start; a->cd_repeat = repeat; a->cd_on = 1;
+    if (a->cd_vol <= 0 || a->cd_fade < 0) { a->cd_vol = 1.0f; a->cd_fade = 0; }
+}
+
 /* render `n` stereo samples into out (interleaved int16) */
 void audio_render(audio_t *a, int16_t *out, int n) {
     float ml = lr_tab[a->main_lr >> 4], mr = lr_tab[a->main_lr & 15];
@@ -122,6 +128,21 @@ void audio_render(audio_t *a, int16_t *out, int n) {
                 if (a->ad_pos >= a->ad_end) a->ad_on = 0;
             }
             L += a->ad_last * 0.5f * a->ad_vol; R += a->ad_last * 0.5f * a->ad_vol;
+        }
+        if (a->cd_on && a->cd_fetch) {
+            int16_t lr[2] = {0, 0};
+            if (a->cd_fetch(a->cd_ctx, (long)a->cd_pos, lr)) {
+                L += lr[0] / 32768.0f * 0.8f * a->cd_vol;
+                R += lr[1] / 32768.0f * 0.8f * a->cd_vol;
+            }
+            a->cd_pos += 44100.0 / RATE;
+            if (a->cd_pos >= a->cd_end) {
+                if (a->cd_repeat) a->cd_pos = a->cd_start; else a->cd_on = 0;
+            }
+            if (a->cd_fade != 0) {
+                a->cd_vol += a->cd_fade;
+                if (a->cd_vol <= 0) { a->cd_vol = 0; a->cd_fade = 0; }
+            }
         }
         int il = (int)(L * 32767), ir = (int)(R * 32767);
         out[s * 2] = il > 32767 ? 32767 : il < -32768 ? -32768 : il;

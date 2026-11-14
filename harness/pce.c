@@ -382,6 +382,45 @@ void pce_load_volatile(pce_t *m, const char *path) {
     fclose(f);
 }
 
+/* CD-DA source: per-track raw files from split_tracks.ps1 (loaded on first use) */
+static int cd_fetch(void *ctx, long sample, int16_t *lr) {
+    pce_t *m = ctx;
+    long frame = sample / 588;
+    for (int i = 0; i < m->ntoc; i++) {
+        struct toc_ent *t = &m->toc[i];
+        if (frame < t->start || frame >= t->start + t->frames) continue;
+        if (!t->audio) return 0;
+        if (!t->data) {
+            char p[512]; snprintf(p, sizeof p, "%s/track%02d.bin", m->tracks_dir, t->track);
+            FILE *f = fopen(p, "rb");
+            if (!f) { t->audio = 0; return 0; }
+            t->data = malloc(t->frames * 2352);
+            if (fread(t->data, 2352, t->frames, f) != (size_t)t->frames) {}
+            fclose(f);
+        }
+        long off = (sample - t->start * 588) * 4;
+        lr[0] = (int16_t)(t->data[off] | t->data[off + 1] << 8);
+        lr[1] = (int16_t)(t->data[off + 2] | t->data[off + 3] << 8);
+        return 1;
+    }
+    return 0;
+}
+
+int pce_load_toc(pce_t *m, const char *dir) {
+    char p[512]; snprintf(p, sizeof p, "%s/toc.txt", dir);
+    FILE *f = fopen(p, "r");
+    if (!f) return -1;
+    snprintf(m->tracks_dir, sizeof m->tracks_dir, "%s", dir);
+    char type[32]; int tr; long st, fr;
+    while (m->ntoc < 100 && fscanf(f, "%d %31s %ld %ld", &tr, type, &st, &fr) == 4) {
+        struct toc_ent *t = &m->toc[m->ntoc++];
+        t->track = tr; t->audio = !strcmp(type, "AUDIO"); t->start = st; t->frames = fr; t->data = NULL;
+    }
+    fclose(f);
+    m->audio.cd_fetch = cd_fetch; m->audio.cd_ctx = m;
+    return m->ntoc;
+}
+
 int pce_init(pce_t *m, const char *disc_iso, const char *bios_rom) {
     memset(m, 0, sizeof *m);
     m->log = stderr;
