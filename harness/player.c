@@ -109,13 +109,13 @@ static void audio_cb(pce_t *m, const int16_t *buf, int n) { (void)m; SDL_QueueAu
 
 static uint8_t pad_from_input(const Uint8 *k, SDL_GameController *gc) {
     uint8_t b = 0;
-    if (k[SDL_SCANCODE_X]) b |= 0x01; if (k[SDL_SCANCODE_Z]) b |= 0x02;
+    if (k[SDL_SCANCODE_X]) b |= 0x02; if (k[SDL_SCANCODE_Z]) b |= 0x01;   /* X = jump (II), Z = attack (I) */
     if (k[SDL_SCANCODE_RSHIFT]) b |= 0x04; if (k[SDL_SCANCODE_RETURN]) b |= 0x08;
     if (k[SDL_SCANCODE_UP]) b |= 0x10; if (k[SDL_SCANCODE_RIGHT]) b |= 0x20;
     if (k[SDL_SCANCODE_DOWN]) b |= 0x40; if (k[SDL_SCANCODE_LEFT]) b |= 0x80;
     if (gc) {
-        if (SDL_GameControllerGetButton(gc, SDL_CONTROLLER_BUTTON_A)) b |= 0x01;
-        if (SDL_GameControllerGetButton(gc, SDL_CONTROLLER_BUTTON_X) || SDL_GameControllerGetButton(gc, SDL_CONTROLLER_BUTTON_B)) b |= 0x02;
+        if (SDL_GameControllerGetButton(gc, SDL_CONTROLLER_BUTTON_A)) b |= 0x02;   /* jump */
+        if (SDL_GameControllerGetButton(gc, SDL_CONTROLLER_BUTTON_X) || SDL_GameControllerGetButton(gc, SDL_CONTROLLER_BUTTON_B)) b |= 0x01;   /* attack */
         if (SDL_GameControllerGetButton(gc, SDL_CONTROLLER_BUTTON_BACK)) b |= 0x04;
         if (SDL_GameControllerGetButton(gc, SDL_CONTROLLER_BUTTON_START)) b |= 0x08;
         int ax = SDL_GameControllerGetAxis(gc, SDL_CONTROLLER_AXIS_LEFTX), ay = SDL_GameControllerGetAxis(gc, SDL_CONTROLLER_AXIS_LEFTY);

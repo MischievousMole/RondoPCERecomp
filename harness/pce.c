@@ -428,6 +428,7 @@ int pce_load_toc(pce_t *m, const char *dir) {
 int pce_init(pce_t *m, const char *disc_iso, const char *bios_rom) {
     memset(m, 0, sizeof *m);
     m->log = stderr;
+    audio_reset(&m->audio); m->audio.ad_vol = 1.0f;   /* before disc_open: it installs the CD-DA source */
     FILE *f;
     size_t dl = strlen(disc_iso);
     if (dl > 4 && (!strcmp(disc_iso + dl - 4, ".cue") || !strcmp(disc_iso + dl - 4, ".CUE"))) {
@@ -445,7 +446,7 @@ int pce_init(pce_t *m, const char *disc_iso, const char *bios_rom) {
     m->volatile_map = calloc(256, 0x2000);
     for (int i = 0; g_volatile[i].n; i++)
         for (int k = 0; k < g_volatile[i].n; k++) m->volatile_map[g_volatile[i].bank][g_volatile[i].off + k] = 1;
-    audio_reset(&m->audio); m->audio.ad_vol = 1.0f;
+
     for (int i = 0; i < 256; i++) { m->cur_ovl[i] = -1; m->bank_dirty[i] = 1; }
     for (int i = 0; i < 4096; i++) m->ovl_native[i] = -2;
     m->cpu.read = pce_read; m->cpu.write = pce_write; m->cpu.ctx = m;
