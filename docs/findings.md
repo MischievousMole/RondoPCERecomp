@@ -45,3 +45,8 @@ Difftest on 8 stage saves x 30,000 frames: 423,762 checks, 0 failures, 99.9-100%
 - Totals: 46,929 executed instruction addresses in 65 bank versions; 46,722 translated, 0 bails.
 - Difftest (same 8 saves, native, invincible): 567,589 checks, 0 failures, 99.9-100% native.
 - The "raster split" in the carriage cutscene is the game's intended portrait-to-carriage wipe, not a bug.
+
+## Later stages 2026-11-13
+- Stage byte values: $02 = 1/2-3/4-6/8 -> music 9/10/11/12; $03 = 1/2-3/4-6/8 -> 13/14/15/6; $04 = 4-6 -> 16.
+- Totals: 65,361 executed instruction addresses in 95 bank versions; 65,147 translated, 0 bails.
+- Difftest on 8 saves x 40,000 frames (invincible): 380,228 checks, 0 failures, 100% native.
