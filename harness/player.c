@@ -46,7 +46,7 @@ static GLuint compile(GLenum type, const char *src) {
 
 /* --- settings --- */
 static int present_mode = VP_120_REPEAT;
-static int sync_mode = 0;   /* 0 auto, 1 vblank-locked, 2 VRR/clock */
+static int sync_mode = 2;   /* 0 auto, 1 vblank-locked, 2 VRR/clock (default: original speed) */
 static void load_ini(void) {
     FILE *f = fopen(ini_path, "r"); if (!f) return;
     char k[64]; float v;
@@ -251,7 +251,9 @@ int main(int argc, char **argv) {
                 save_ini();
             }
         }
-        int run = locked ? (vbl % per == 0) : 1;
+        /* clock mode with repeat/BFI: two presents per game frame (119.65 Hz) */
+        int sub = (!locked && present_mode != VP_60) ? 2 : 1;
+        int run = locked ? (vbl % per == 0) : (vbl % sub == 0);
         if (run) {
             PM.joy_buttons = pad_from_input(SDL_GetKeyboardState(NULL), gc);
             if (test_input) {   /* "frame:mask,..." as in pcerun */
@@ -273,7 +275,7 @@ int main(int argc, char **argv) {
         }
         int fw, fh; SDL_GL_GetDrawableSize(win, &fw, &fh);
         glViewport(0, 0, fw, fh);
-        if (locked && present_mode == VP_120_BFI && per >= 2 && !fresh) {   /* black on the in-between refreshes */
+        if (present_mode == VP_120_BFI && ((locked && per >= 2) || !locked) && !fresh) {   /* black on the in-between refreshes */
             glClearColor(0, 0, 0, 1); glClear(GL_COLOR_BUFFER_BIT);
         } else {
             int ox, oy, ow, oh; video_geometry(&V, sw, sh, dot, fw, fh, &ox, &oy, &ow, &oh);
@@ -294,7 +296,7 @@ int main(int argc, char **argv) {
         }
         if (!locked) {
             /* VRR / clock mode: present each game frame at its exact time */
-            next += 1.0 / GAME_HZ;
+            next += 1.0 / (GAME_HZ * sub);
             double wait = next - now_s();
             if (wait > 0.002) SDL_Delay((Uint32)((wait - 0.0015) * 1000));
             while (now_s() < next) {}
