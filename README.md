@@ -13,3 +13,13 @@ committed: point the tools at your own disc image.
     gcc -O2 -o harness/pcerun harness/*.c
     harness/pcerun data.iso build/out 3600 -v -d 0:3600:120
 `data.iso` = track 2 user data (2048-byte sectors) starting at INDEX 01.
+
+## Recompiled code is generated from your disc
+No game code or data is stored in this repository. `recipe/overlays.txt` lists, for each code bank the game uses,
+which offsets are instructions and where those bytes are on the disc. `tools/gen_from_disc.py` reads your own
+disc image (.cue + .img/.bin), checks every bank against its CRC and runs the translator (`tools/recomp.py`):
+
+    python3 tools/gen_from_disc.py /path/to/your/game.cue        # -> harness/native/
+    RONDO_DISC=/path/to/your/game.cue harness/build_player.sh windows   # does it automatically when needed
+
+Source disc: Akumajou Dracula X: Chi no Rondo (JP), data track MD5 of the trurip set noted in docs/findings.md.

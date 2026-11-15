@@ -9,3 +9,11 @@ game/
 *.pce
 *.rom
 harness/pcerun
+harness/native/
+harness/shaders_gen.h
+harness/font_gen.h
+__pycache__/
+*.pyc
+harness/pcerun_native
+harness/video_test
+harness/video_test1

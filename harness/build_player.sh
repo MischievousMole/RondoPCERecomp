@@ -8,6 +8,10 @@ def cstr(p):
 open('shaders_gen.h', 'w').write('static const char SHADER_VERT[] = ' + cstr('../shaders/rondo_video.vert') + ';\nstatic const char SHADER_FRAG[] = ' + cstr('../shaders/rondo_video.frag') + ';\n')
 PY
 python3 ../tools/gen_font.py font_gen.h
+if [ ! -f native/native_table.c ]; then
+  [ -n "$RONDO_DISC" ] || { echo "Set RONDO_DISC=/path/to/your/game.cue to generate the recompiled code from your disc"; exit 1; }
+  python3 ../tools/gen_from_disc.py "$RONDO_DISC" native
+fi
 SRC="player.c menu.c pce.c cpu6280.c bios_hle.c render.c audio.c video.c disc.c native/*.c"
 T=${1:-linux}
 OUT=../build/player/$T; mkdir -p $OUT
