@@ -117,24 +117,25 @@ int menu_event(const SDL_Event *e, menu_ctx *c) {
 }
 
 /* ---- drawing ---- */
-static uint32_t *B; static int BW, BH;
+static uint32_t *B; static int BW, BH, G = 1;   /* G = physical pixels per logical pixel */
 static void fill(int x, int y, int w, int h, uint32_t argb) {
+    x *= G; y *= G; w *= G; h *= G;
     for (int j = y < 0 ? 0 : y; j < y + h && j < BH; j++)
         for (int i = x < 0 ? 0 : x; i < x + w && i < BW; i++) B[j * BW + i] = argb;
 }
 static void text(int x, int y, const char *s, uint32_t rgb, int scale) {
+    int k = G * scale;
     for (; *s; s++, x += FONT_W * scale) {
         int c = (unsigned char)*s; if (c < 32 || c > 126) c = '?';
         const unsigned char *g = FONT[c - 32];
-        for (int j = 0; j < FONT_H * scale; j++)
-            for (int i = 0; i < FONT_W * scale; i++) {
-                int px = x + i, py = y + j; if (px < 0 || py < 0 || px >= BW || py >= BH) continue;
-                unsigned a = g[(j / scale) * FONT_W + i / scale]; if (!a) continue;
-                uint32_t d = B[py * BW + px]; unsigned da = d >> 24;
-                /* blend text over whatever is in the overlay */
-                unsigned r = ((rgb >> 16 & 255) * a + (d >> 16 & 255) * (255 - a)) / 255, gg = ((rgb >> 8 & 255) * a + (d >> 8 & 255) * (255 - a)) / 255,
-                         b = ((rgb & 255) * a + (d & 255) * (255 - a)) / 255, na = a + da * (255 - a) / 255;
-                B[py * BW + px] = na << 24 | r << 16 | gg << 8 | b;
+        for (int j = 0; j < FONT_H; j++)
+            for (int i = 0; i < FONT_W; i++) {
+                if (!g[j * FONT_W + i]) continue;
+                for (int b = 0; b < k; b++)
+                    for (int a = 0; a < k; a++) {
+                        int px = x * G + i * k + a, py = y * G + j * k + b;
+                        if (px >= 0 && py >= 0 && px < BW && py < BH) B[py * BW + px] = 0xFF000000u | rgb;
+                    }
             }
     }
 }
@@ -146,9 +147,10 @@ static const char *padname(int b) {
     return b >= 0 && b < 15 ? nm[b] : "-";
 }
 
-void menu_draw(uint32_t *buf, int w, int h) {
-    B = buf; BW = w; BH = h;
-    memset(buf, 0, (size_t)w * h * 4);
+void menu_draw(uint32_t *buf, int pw_, int ph_) {
+    B = buf; BW = pw_; BH = ph_; G = pw_ / 640; if (G < 1) G = 1;
+    memset(buf, 0, (size_t)pw_ * ph_ * 4);
+    int w = 640, h = 360;    /* logical layout */
     if (!open_) return;
     item_t it[24]; int n = build(it);
     const uint32_t WHITE = 0xF0F0F0, GREY = 0x9A9A9A, GOLD = 0xE8C060, RED = 0xC03030;
@@ -158,31 +160,31 @@ void menu_draw(uint32_t *buf, int w, int h) {
         char v[96];
         if (t->type == I_CHOICE) snprintf(v, sizeof v, "%s   < %s >", t->label, t->names[*t->ival]);
         else snprintf(v, sizeof v, "%s   < %d%% >", t->label, (int)(*t->fval * 100 + 0.5f));
-        fill(0, h - 34, w, 34, 0xCC0C0C0C);
-        text((w - (int)strlen(v) * FONT_W) / 2, h - 27, v, GOLD, 1);
-        text(8, h - 27, "VIDEO", GREY, 1);
-        textr(w - 8, h - 27, "up/down: more", 0x707070);
+        fill(0, h - 24, w, 24, 0xCC0C0C0C);
+        text((w - (int)strlen(v) * FONT_W) / 2, h - 16, v, GOLD, 1);
+        text(8, h - 16, "VIDEO", GREY, 1);
+        textr(w - 8, h - 16, "up/down: more", 0x707070);
         return;
     }
-    int rowh = page == P_VIDEO ? 20 : 22;
+    int rowh = page == P_VIDEO ? 14 : 16;
     int px = (w - 380) / 2, pw = 380;
     if (launcher) fill(0, 0, w, h, 0xFF000000); else fill(0, 0, w, h, 0x99000000);
     static const char *const titles[] = { "", "PAUSED", "VIDEO", "AUDIO", "CONTROLS" };
     int has_t = titles[page][0] != 0;
-    int ph = n * rowh + (has_t ? 30 : 0) + 20;
-    int top = launcher && page == P_LAUNCH ? 150 : (h - ph) / 2 + 10;
+    int ph = n * rowh + (has_t ? 22 : 0) + 16;
+    int top = launcher && page == P_LAUNCH ? 160 : (h - ph) / 2 + 8;
     if (top < 14) top = 14;
     if (launcher && page == P_LAUNCH) {
-        text((w - 18 * FONT_W * 2) / 2, 40, "AKUMAJOU DRACULA X", 0xD8D0C0, 2);
-        text((w - 12 * FONT_W) / 2, 90, "CHI NO RONDO", RED, 1);
+        text((w - 18 * FONT_W * 3) / 2, 60, "AKUMAJOU DRACULA X", 0xD8D0C0, 3);
+        text((w - 12 * FONT_W) / 2, 100, "CHI NO RONDO", RED, 1);
     }
-    fill(px - 10, top - 10, pw + 20, ph, 0xF5101010);
+    fill(px - 10, top - 8, pw + 20, ph, 0xF5101010);
     if (has_t) text(px, top, titles[page], GOLD, 1);
-    int y = top + (has_t ? 30 : 4);
+    int y = top + (has_t ? 22 : 4);
     for (int i = 0; i < n; i++, y += rowh) {
         item_t *t = &it[i];
         int on = i == sel[page];
-        if (on) fill(px - 6, y - 1, pw + 12, rowh - 1, 0xFF5A1A1A);
+        if (on) fill(px - 6, y - 3, pw + 12, rowh - 2, 0xFF5A1A1A);
         text(px, y, t->label, on ? WHITE : GREY, 1);
         char v[64] = "";
         if (t->type == I_CHOICE) snprintf(v, sizeof v, "< %s >", t->names[*t->ival]);
@@ -193,7 +195,7 @@ void menu_draw(uint32_t *buf, int w, int h) {
         }
         if (v[0]) textr(px + pw, y, v, on ? GOLD : GREY);
     }
-    if (top + ph + 4 > h - 30) return;   /* no room for the hint line */
+    if (top + ph + 4 > h - 18) return;   /* no room for the hint line */
     const char *hint = page == P_CONTROLS ? "Enter/A: rebind   Esc/B: back" : "Arrows/D-pad: move, change   Enter/A: select   Esc/B: back";
-    text((w - (int)strlen(hint) * FONT_W) / 2, h - 28, hint, 0x808080, 1);
+    text((w - (int)strlen(hint) * FONT_W) / 2, h - 16, hint, 0x808080, 1);
 }

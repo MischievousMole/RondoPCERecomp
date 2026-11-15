@@ -58,6 +58,7 @@ static const int def_pads[MENU_NBIND] = { SDL_CONTROLLER_BUTTON_DPAD_UP, SDL_CON
                                           SDL_CONTROLLER_BUTTON_START, SDL_CONTROLLER_BUTTON_BACK };
 static int keymap[MENU_NBIND], padmap[MENU_NBIND];
 static int binds_v = 0;   /* 1 = jump/attack rows in true PCE order */
+static int had_binds = 0;
 static void load_ini(void) {
     FILE *f = fopen(ini_path, "r"); if (!f) return;
     char k[64]; float v;
@@ -69,7 +70,7 @@ static void load_ini(void) {
         else if (!strcmp(k, "vol_master")) vol[0] = v; else if (!strcmp(k, "vol_music")) vol[1] = v;
         else if (!strcmp(k, "vol_sfx")) vol[2] = v; else if (!strcmp(k, "vol_voices")) vol[3] = v;
         else if (!strcmp(k, "binds_v")) binds_v = (int)v;
-        else if (!strncmp(k, "key", 3) && k[3] >= '0' && k[3] < '0' + MENU_NBIND) keymap[k[3] - '0'] = (int)v;
+        else if (!strncmp(k, "key", 3) && k[3] >= '0' && k[3] < '0' + MENU_NBIND) { keymap[k[3] - '0'] = (int)v; had_binds = 1; }
         else if (!strncmp(k, "pad", 3) && k[3] >= '0' && k[3] < '0' + MENU_NBIND) padmap[k[3] - '0'] = (int)v;
         else if (!strcmp(k, "bg_brightness")) V.bri[0] = v; else if (!strcmp(k, "bg_contrast")) V.con[0] = v;
         else if (!strcmp(k, "sprite_brightness")) V.bri[1] = v; else if (!strcmp(k, "sprite_contrast")) V.con[1] = v;
@@ -192,7 +193,7 @@ int main(int argc, char **argv) {
     video_default_cfg(&V);
     memcpy(keymap, def_keys, sizeof keymap); memcpy(padmap, def_pads, sizeof padmap);
     load_ini();
-    if (binds_v < 1) {   /* v6 settings: rows 4/5 held each other's buttons */
+    if (binds_v < 1 && had_binds) {   /* v6 settings: rows 4/5 held each other's buttons */
         int t = keymap[4]; keymap[4] = keymap[5]; keymap[5] = t; t = padmap[4]; padmap[4] = padmap[5]; padmap[5] = t; binds_v = 1;
     }
 
@@ -254,7 +255,7 @@ int main(int argc, char **argv) {
     pglUseProgram(ovprog); pglUniform1i(pglGetUniformLocation(ovprog, "uOv"), 1);
     GLint uOvFb = pglGetUniformLocation(ovprog, "uFb");
     pglUseProgram(prog);
-    enum { OVW = 640, OVH = 360 };
+    enum { OVW = 1280, OVH = 720 };
     static uint32_t overlay[OVW * OVH];
     menu_ctx mc = { &V, &present_mode, &sync_mode, &fullscreen, { &vol[0], &vol[1], &vol[2], &vol[3] }, keymap, padmap };
     int started = 0;
