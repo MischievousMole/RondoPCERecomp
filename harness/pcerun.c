@@ -30,6 +30,8 @@ int main(int argc, char **argv) {
     M.outdir = out;
     { extern const char *bram_dir; static char bd[512]; snprintf(bd, sizeof bd, "%s/bram", out); bram_dir = bd; }
     if (getenv("PCE_NATIVE")) M.native_on = 1;
+    if (getenv("PCE_VCELOG")) M.vce_log = 1;
+    if (getenv("PCE_WATCH")) M.watch = strtol(getenv("PCE_WATCH"), NULL, 16);
     if (tracks && pce_load_toc(&M, tracks) < 0) fprintf(stderr, "no toc in %s\n", tracks);
     pce_load_volatile(&M, getenv("PCE_VOLATILE") ? getenv("PCE_VOLATILE") : "tools/volatile.txt");
     if (getenv("PCE_DIFFTEST")) M.difftest_every = atoi(getenv("PCE_DIFFTEST"));
@@ -87,6 +89,8 @@ int main(int argc, char **argv) {
             fclose(fd);
             snprintf(path, sizeof path, "%s/vram_%06ld.bin", out, f);
             fd = fopen(path, "wb"); fwrite(M.vdc.vram, 2, 0x8000, fd); fclose(fd);
+            snprintf(path, sizeof path, "%s/cram_%06ld.bin", out, f);
+            fd = fopen(path, "wb"); fwrite(M.cram, 2, 512, fd); fwrite(M.vdc.satb, 2, 256, fd); fclose(fd);
             snprintf(path, sizeof path, "%s/adpcm_%06ld.bin", out, f);
             fd = fopen(path, "wb"); fwrite(M.adpcm, 1, 0x10000, fd); fclose(fd);
         }

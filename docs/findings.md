@@ -50,3 +50,10 @@ Difftest on 8 stage saves x 30,000 frames: 423,762 checks, 0 failures, 99.9-100%
 - Stage byte values: $02 = 1/2-3/4-6/8 -> music 9/10/11/12; $03 = 1/2-3/4-6/8 -> 13/14/15/6; $04 = 4-6 -> 16.
 - Totals: 65,361 executed instruction addresses in 95 bank versions; 65,147 translated, 0 bails.
 - Difftest on 8 saves x 40,000 frames (invincible): 380,228 checks, 0 failures, 100% native.
+
+## Raster IRQ below the picture (fixed 2026-11-15)
+The cave/water stages split palette 0 (Richter) mid-frame: at the water line the game saves the palette by
+reading CRAM back and fills it with blue ($007); a second raster IRQ at RCR=$121 - inside vertical blanking,
+below the 224 visible lines - restores it. The VDC raster counter keeps running through blanking, so RCR must
+be compared on every line, not only visible ones. Before the fix Richter stayed blue after entering water stages.
+Debug aids added: PCE_VCELOG=1 (writes to sprite palette 0 with PC), PCE_WATCH=addr (RAM writes with PC).

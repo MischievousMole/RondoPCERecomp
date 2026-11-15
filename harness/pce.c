@@ -151,7 +151,11 @@ void pce_write(void *ctx, uint32_t a, uint8_t v) {
     }
     if (bank >= 0x68 && bank < 0x80) { m->scdram[a - 0x68 * 0x2000] = v; return; }
     if (bank >= 0x80 && bank < 0x88) { m->cdram[a - 0x80 * 0x2000] = v; return; }
-    if (bank >= 0xF8 && bank < 0xFC) { m->ram[off] = v; return; }
+    if (bank >= 0xF8 && bank < 0xFC) {
+        if (m->watch && off == (m->watch & 0x1FFF))
+            fprintf(m->log, "WATCH f%ld l%d %04X=%02X (was %02X) pc=%02X:%04X\n", m->frame, m->line, 0x2000 | off, v, m->ram[off], m->cpu.mpr[m->cpu.pc >> 13], m->cpu.pc);
+        m->ram[off] = v; return;
+    }
     if (bank == 0xFF) {
         switch (off & 0x1C00) {
         case 0x0000: vdc_write(m, off & 3, v); return;
@@ -161,7 +165,11 @@ void pce_write(void *ctx, uint32_t a, uint8_t v) {
             case 2: m->vce_addr = (m->vce_addr & 0x100) | v; break;
             case 3: m->vce_addr = (m->vce_addr & 0xFF) | ((v & 1) << 8); break;
             case 4: m->cram[m->vce_addr & 0x1FF] = (m->cram[m->vce_addr & 0x1FF] & 0x100) | v; break;
-            case 5: m->cram[m->vce_addr & 0x1FF] = (m->cram[m->vce_addr & 0x1FF] & 0xFF) | ((v & 1) << 8); m->vce_addr++; break;
+            case 5:
+                m->cram[m->vce_addr & 0x1FF] = (m->cram[m->vce_addr & 0x1FF] & 0xFF) | ((v & 1) << 8);
+                if (m->vce_log && (m->vce_addr & 0x1F0) == 0x100)
+                    fprintf(m->log, "VCE f%ld %03X=%03X pc=%02X:%04X\n", m->frame, m->vce_addr & 0x1FF, m->cram[m->vce_addr & 0x1FF], m->cpu.mpr[m->cpu.pc >> 13], m->cpu.pc);
+                m->vce_addr++; break;
             }
             return;
         case 0x0800: {
@@ -339,10 +347,8 @@ void pce_run_frame(pce_t *m) {
     if (v->disp_end > 261) v->disp_end = 261;
     for (m->line = 0; m->line < LINES_PER_FRAME && !m->stop; m->line++) {
         if (m->line == v->disp_start) { v->line_ctr = 64; v->bg_y = v->reg[8]; }
-        /* raster compare */
-        if (m->line >= v->disp_start && m->line < v->disp_end) {
-            if ((v->reg[6] & 0x3FF) == v->line_ctr && (v->reg[5] & 0x04)) { v->status |= 0x04; vdc_irq_update(m); }
-        }
+        /* raster compare: the counter keeps running through the blanking lines, so RCR can match below the picture */
+        if ((v->reg[6] & 0x3FF) == v->line_ctr && (v->reg[5] & 0x04)) { v->status |= 0x04; vdc_irq_update(m); }
         if (m->line >= v->disp_start && m->line < v->disp_end)
             render_line(m, m->line - v->disp_start, v->bg_y);
         run_cycles(m, CPU_CYC_PER_LINE);

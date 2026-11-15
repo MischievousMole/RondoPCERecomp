@@ -72,6 +72,7 @@ typedef struct pce {
     long smc_writes;
     /* native code */
     int native_on, difftest_every;
+    int vce_log, watch;
     int bulk_load;                     /* BIOS loader writing: not self-modifying code */
     uint8_t (*volatile_map)[0x2000];   /* bytes patched at runtime: excluded from overlay hashes */
     int16_t ovl_native[4096];          /* per overlay index: native table index, -1 none, -2 unresolved */
