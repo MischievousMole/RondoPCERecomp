@@ -11,6 +11,7 @@ typedef struct menu_ctx {
     int *present_mode, *sync_mode, *fullscreen;
     float *vol[4];            /* master, music, sfx, voices */
     int *keymap, *padmap;     /* SDL scancodes / SDL controller buttons, MENU_NBIND each */
+    int *ss_choice;           /* screensaver delay index (NULL: build without screensaver) */
 } menu_ctx;
 
 extern const char *const menu_bind_names[MENU_NBIND];

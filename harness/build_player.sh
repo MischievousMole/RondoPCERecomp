@@ -14,13 +14,24 @@ if [ ! -f native/native_table.c ]; then
 fi
 SRC="player.c menu.c pce.c cpu6280.c bios_hle.c render.c audio.c video.c disc.c native/*.c"
 T=${1:-linux}
-OUT=../build/player/$T; mkdir -p $OUT
+VARIANT=${2:-}
+EXTRA=""
+if [ "$VARIANT" = santable ]; then
+  python3 - <<'PY2'
+import subprocess, sys
+subprocess.check_call([sys.executable, '../extras/santable/gen_wordmark.py', 'santable_word.tmp'])
+frag = open('../extras/santable/santable.frag').read().replace('\\', '\\\\').replace('"', '\\"').replace('\n', '\\n"\n"')
+open('santable_gen.h', 'w').write('static const char SANTABLE_FRAG[] = "' + frag + '";\n' + open('santable_word.tmp').read())
+PY2
+  EXTRA="-DSANTABLE"
+fi
+OUT=../build/player/$T${VARIANT:+-$VARIANT}; mkdir -p $OUT
 if [ "$T" = windows ]; then
   SDL=${SDL_MINGW:-$HOME/rondo/third_party/SDL2-2.30.9/x86_64-w64-mingw32}
-  x86_64-w64-mingw32-gcc -O2 -w -I$SDL/include/SDL2 -Dmain=SDL_main $SRC -o $OUT/RondoRecomp.exe \
+  x86_64-w64-mingw32-gcc -O2 -w $EXTRA -I$SDL/include/SDL2 -Dmain=SDL_main $SRC -o $OUT/RondoRecomp.exe \
     -L$SDL/lib -static -lmingw32 -lSDL2main -lSDL2 -mwindows -lsetupapi -limm32 -lversion -lwinmm -lole32 -loleaut32 \
     -lgdi32 -luuid -lcfgmgr32 -lopengl32 -lm -lpthread
 else
-  gcc -O2 -w $(sdl2-config --cflags) $SRC -o $OUT/rondo $(sdl2-config --libs) -lGL -lm -lpthread
+  gcc -O2 -w $EXTRA $(sdl2-config --cflags) $SRC -o $OUT/rondo $(sdl2-config --libs) -lGL -lm -lpthread
 fi
 ls -la $OUT

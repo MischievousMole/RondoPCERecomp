@@ -16,6 +16,9 @@
 #include "video.h"
 #include "shaders_gen.h"
 #include "menu.h"
+#ifdef SANTABLE
+#include "santable_gen.h"   /* SANTABLE_FRAG + WORDMARK (generated from extras/santable) */
+#endif
 
 static pce_t PM;
 static video_cfg V;
@@ -59,6 +62,7 @@ static const int def_pads[MENU_NBIND] = { SDL_CONTROLLER_BUTTON_DPAD_UP, SDL_CON
 static int keymap[MENU_NBIND], padmap[MENU_NBIND];
 static int binds_v = 0;   /* 1 = jump/attack rows in true PCE order */
 static int had_binds = 0;
+static int ss_choice = 2;   /* screensaver delay: off, 1, 3, 5, 10 min */
 static void load_ini(void) {
     FILE *f = fopen(ini_path, "r"); if (!f) return;
     char k[64]; float v;
@@ -70,6 +74,7 @@ static void load_ini(void) {
         else if (!strcmp(k, "vol_master")) vol[0] = v; else if (!strcmp(k, "vol_music")) vol[1] = v;
         else if (!strcmp(k, "vol_sfx")) vol[2] = v; else if (!strcmp(k, "vol_voices")) vol[3] = v;
         else if (!strcmp(k, "binds_v")) binds_v = (int)v;
+        else if (!strcmp(k, "screensaver")) ss_choice = (int)v;
         else if (!strncmp(k, "key", 3) && k[3] >= '0' && k[3] < '0' + MENU_NBIND) { keymap[k[3] - '0'] = (int)v; had_binds = 1; }
         else if (!strncmp(k, "pad", 3) && k[3] >= '0' && k[3] < '0' + MENU_NBIND) padmap[k[3] - '0'] = (int)v;
         else if (!strcmp(k, "bg_brightness")) V.bri[0] = v; else if (!strcmp(k, "bg_contrast")) V.con[0] = v;
@@ -83,7 +88,7 @@ static void save_ini(void) {
     fprintf(f, "sync=%d\nfilter=%d\ninteger=%d\npresent=%d\nbg_brightness=%.2f\nbg_contrast=%.2f\nsprite_brightness=%.2f\nsprite_contrast=%.2f\nscanlines=%.2f\nmask=%.2f\n",
             sync_mode, V.filter, V.integer, present_mode, V.bri[0], V.con[0], V.bri[1], V.con[1], V.scan_strength, V.mask_strength);
     fprintf(f, "aspect=%d\nfullscreen=%d\nvol_master=%.2f\nvol_music=%.2f\nvol_sfx=%.2f\nvol_voices=%.2f\n", V.aspect, fullscreen, vol[0], vol[1], vol[2], vol[3]);
-    fprintf(f, "binds_v=1\n");
+    fprintf(f, "binds_v=1\nscreensaver=%d\n", ss_choice);
     for (int i = 0; i < MENU_NBIND; i++) fprintf(f, "key%d=%d\npad%d=%d\n", i, keymap[i], i, padmap[i]);
     fclose(f);
 }
@@ -257,7 +262,24 @@ int main(int argc, char **argv) {
     pglUseProgram(prog);
     enum { OVW = 1280, OVH = 720 };
     static uint32_t overlay[OVW * OVH];
-    menu_ctx mc = { &V, &present_mode, &sync_mode, &fullscreen, { &vol[0], &vol[1], &vol[2], &vol[3] }, keymap, padmap };
+    menu_ctx mc = { &V, &present_mode, &sync_mode, &fullscreen, { &vol[0], &vol[1], &vol[2], &vol[3] }, keymap, padmap, NULL };
+#ifdef SANTABLE
+    mc.ss_choice = &ss_choice;
+    GLuint ssprog = pglCreateProgram();
+    pglAttachShader(ssprog, compile(GL_VERTEX_SHADER, SHADER_VERT)); pglAttachShader(ssprog, compile(GL_FRAGMENT_SHADER, SANTABLE_FRAG));
+    pglLinkProgram(ssprog);
+    GLuint wtex; glGenTextures(1, &wtex); pglActiveTexture(GL_TEXTURE2); glBindTexture(GL_TEXTURE_2D, wtex);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR); glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_R8, WORD_W, WORD_H, 0, GL_RED, GL_UNSIGNED_BYTE, WORDMARK);
+    pglActiveTexture(GL_TEXTURE0);
+    pglUseProgram(ssprog); pglUniform1i(pglGetUniformLocation(ssprog, "uWord"), 2);
+    pglUniform2f(pglGetUniformLocation(ssprog, "uWordSize"), WORD_W, WORD_H);
+    GLint uSsRes = pglGetUniformLocation(ssprog, "uRes"), uSsTime = pglGetUniformLocation(ssprog, "uTime");
+    pglUseProgram(prog);
+#endif
+    static const int ss_minutes[5] = { 0, 1, 3, 5, 10 };
+    double last_input = 0; int ss_active = 0; double ss_start = 0;
     int started = 0;
 
     SDL_GameController *gc = NULL;
@@ -293,6 +315,11 @@ int main(int argc, char **argv) {
         }
         while (SDL_PollEvent(&e)) {
             if (e.type == SDL_QUIT) { running = 0; break; }
+            if (e.type == SDL_KEYDOWN || e.type == SDL_CONTROLLERBUTTONDOWN || e.type == SDL_MOUSEBUTTONDOWN ||
+                (e.type == SDL_CONTROLLERAXISMOTION && (e.caxis.value > 16000 || e.caxis.value < -16000))) {
+                last_input = now_s();
+                if (ss_active) { ss_active = 0; next = now_s(); vbl = 0; continue; }   /* wake: swallow the press */
+            }
             if (e.type == SDL_CONTROLLERDEVICEADDED && !gc) { gc = SDL_GameControllerOpen(e.cdevice.which); continue; }
             if (e.type == SDL_KEYDOWN && e.key.keysym.sym == SDLK_F11 && !e.key.repeat) {
                 fullscreen ^= 1; SDL_SetWindowFullscreen(win, fullscreen ? SDL_WINDOW_FULLSCREEN_DESKTOP : 0); save_ini(); continue;
@@ -325,7 +352,15 @@ int main(int argc, char **argv) {
                  (gc && SDL_GameControllerGetButton(gc, SDL_CONTROLLER_BUTTON_START) && SDL_GameControllerGetButton(gc, SDL_CONTROLLER_BUTTON_BACK)))))
                 menu_open(&mc, 0);
         }
-        int paused = menu_is_open() || !started && !test_frames;
+        if (last_input == 0) last_input = now_s();
+#ifdef SANTABLE
+        if (!ss_active && ss_minutes[ss_choice] && !test_frames && now_s() - last_input > ss_minutes[ss_choice] * 60.0) {
+            if (started && !menu_is_open()) menu_open(&mc, 0);     /* idle in game: pause first */
+            ss_active = 1; ss_start = now_s();
+        }
+        if (getenv("RONDO_SS_TEST")) { ss_active = 1; if (ss_start == 0) ss_start = now_s() - atof(getenv("RONDO_SS_TEST")); }
+#endif
+        int paused = menu_is_open() || !started && !test_frames || ss_active;
         /* clock mode with repeat/BFI: two presents per game frame (119.65 Hz) */
         int sub = (!locked && present_mode != VP_60) ? 2 : 1;
         int run = locked ? (vbl % per == 0) : (vbl % sub == 0);
@@ -360,6 +395,19 @@ int main(int argc, char **argv) {
             pglUniform1f(uScan, V.scan_strength); pglUniform1f(uMask, V.mask_strength);
             glDrawArrays(GL_TRIANGLES, 0, 3);
         }
+#ifdef SANTABLE
+        if (ss_active) {
+            pglUseProgram(ssprog); pglUniform2f(uSsRes, fw, fh); pglUniform1f(uSsTime, (float)(now_s() - ss_start));
+            glDrawArrays(GL_TRIANGLES, 0, 3); pglUseProgram(prog);
+            if (menu_shot) {
+                static uint8_t px3[3840 * 2160 * 3];
+                glReadPixels(0, 0, fw, fh, GL_RGB, GL_UNSIGNED_BYTE, px3);
+                FILE *o = fopen(menu_shot, "wb"); fprintf(o, "P6\n%d %d\n255\n", fw, fh);
+                for (int y = fh - 1; y >= 0; y--) fwrite(px3 + y * fw * 3, 3, fw, o);
+                fclose(o); running = 0;
+            }
+        } else
+#endif
         if (menu_is_open()) {
             menu_draw(overlay, OVW, OVH);
             if (!started) { glClearColor(0, 0, 0, 1); glClear(GL_COLOR_BUFFER_BIT); }

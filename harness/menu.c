@@ -24,6 +24,7 @@ static const char *const aspects[] = { "Original", "Square pixels", "Stretch 4:3
 static const char *const syncs[] = { "Auto", "Locked to refresh", "VRR (original speed)" };
 static const char *const motions[] = { "60 Hz", "120 Hz repeat", "120 Hz black frame" };
 static const char *const onoff[] = { "Off", "On" };
+static const char *const ssmins[] = { "Off", "1 min", "3 min", "5 min", "10 min" };
 const char *const menu_bind_names[MENU_NBIND] = { "Up", "Down", "Left", "Right", "Jump", "Attack", "Run (start)", "Select" };
 
 static int build(item_t *it) {
@@ -42,7 +43,9 @@ static int build(item_t *it) {
         SL("Scanline strength", &C->v->scan_strength, 0, 1, 0.05f, 1); SL("CRT mask", &C->v->mask_strength, 0, 1, 0.05f, 1);
         SL("Sprite brightness", &C->v->bri[1], 0.5f, 1.5f, 0.05f, 1); SL("Sprite contrast", &C->v->con[1], 0.5f, 1.5f, 0.05f, 1);
         SL("BG brightness", &C->v->bri[0], 0.5f, 1.5f, 0.05f, 1); SL("BG contrast", &C->v->con[0], 0.5f, 1.5f, 0.05f, 1);
-        CH("Fullscreen", C->fullscreen, onoff); ACT("Reset video", MR_RESET_VIDEO); ACT("Back", MR_BACK); break;
+        CH("Fullscreen", C->fullscreen, onoff);
+        if (C->ss_choice) CH("Screensaver", C->ss_choice, ssmins);
+        ACT("Reset video", MR_RESET_VIDEO); ACT("Back", MR_BACK); break;
     case P_AUDIO:
         SL("Master", C->vol[0], 0, 1, 0.05f, 1); SL("Music (CD)", C->vol[1], 0, 1, 0.05f, 1);
         SL("Sound effects", C->vol[2], 0, 1, 0.05f, 1); SL("Voices", C->vol[3], 0, 1, 0.05f, 1); ACT("Back", MR_BACK); break;
