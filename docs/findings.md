@@ -57,3 +57,8 @@ reading CRAM back and fills it with blue ($007); a second raster IRQ at RCR=$121
 below the 224 visible lines - restores it. The VDC raster counter keeps running through blanking, so RCR must
 be compared on every line, not only visible ones. Before the fix Richter stayed blue after entering water stages.
 Debug aids added: PCE_VCELOG=1 (writes to sprite palette 0 with PC), PCE_WATCH=addr (RAM writes with PC).
+
+## Overscan colour when the BG layer is off (fixed 2026-11-15)
+With CR bit 7 (BG enable) clear, the VDC outputs colour $100 (sprite palette 0, entry 0 = overscan colour), not
+CRAM[0]. Stage 1 (burning town) has a dark red backdrop (CRAM[0] = R3) and a black overscan colour; screen-to-screen
+transitions disable the BG, so the old renderer flashed red. Lines outside the active display also use $100.

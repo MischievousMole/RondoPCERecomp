@@ -77,14 +77,14 @@ void render_line(pce_t *m, int y, int bg_y) {
         uint16_t col; uint8_t l;
         if (spr[x] && (sprpri[x] || !pix[x])) { col = m->cram[256 + spr[x]]; l = 2; }
         else if (pix[x]) { col = m->cram[pal[x] * 16 + pix[x]]; l = 1; }
-        else { col = m->cram[0]; l = 0; }
+        else { col = (cr & 0x80) ? m->cram[0] : m->cram[256]; l = 0; }   /* BG off: VDC outputs the overscan colour ($100) */
         out[x] = rgb(col); lay[x] = l;
     }
 }
 
 void render_blank(pce_t *m, int y) {
     if (y < 0 || y >= FB_H) return;
-    uint32_t c = rgb(m->cram[0]);
+    uint32_t c = rgb(m->cram[256]);   /* outside the active display: overscan colour */
     for (int x = 0; x < FB_W; x++) { g_fb[y * FB_W + x] = c; g_layer[y * FB_W + x] = 0; }
 }
 
