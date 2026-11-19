@@ -30,7 +30,7 @@ if [ "$T" = windows ]; then
   SDL=${SDL_MINGW:-$HOME/rondo/third_party/SDL2-2.30.9/x86_64-w64-mingw32}
   x86_64-w64-mingw32-gcc -O2 -w $EXTRA -I$SDL/include/SDL2 -Dmain=SDL_main $SRC -o $OUT/RondoRecomp.exe \
     -L$SDL/lib -static -lmingw32 -lSDL2main -lSDL2 -mwindows -lsetupapi -limm32 -lversion -lwinmm -lole32 -loleaut32 \
-    -lgdi32 -luuid -lcfgmgr32 -lopengl32 -lm -lpthread
+    -lgdi32 -lcomdlg32 -luuid -lcfgmgr32 -lopengl32 -lm -lpthread
 else
   gcc -O2 -w $EXTRA $(sdl2-config --cflags) $SRC -o $OUT/rondo $(sdl2-config --libs) -lGL -lm -lpthread
 fi

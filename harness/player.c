@@ -1,5 +1,5 @@
 /* Rondo recomp player: SDL2 + OpenGL 3.3.
- * - finds the game's .cue (next to the exe or in a subfolder) and syscard3.pce
+ * - finds the user's disc (.cue) and System Card: paths.txt, next to the exe, or a file picker; both are CRC-checked
  * - recompiled code + interpreter fallback, audio-paced at 59.83 Hz
  * - GPU shader output (sharp / pixel / scanlines / CRT), original aspect with side bars
  * - 60 Hz, 120 Hz repeat, 120 Hz black frame insertion; VRR-friendly (vsync on)
@@ -96,6 +96,7 @@ static void save_ini(void) {
 /* --- find files --- */
 #ifdef _WIN32
 #include <windows.h>
+#include <commdlg.h>
 static int find_file(const char *dir, const char *suffix, char *out, size_t n, int depth) {
     char pat[MAX_PATH * 2]; WIN32_FIND_DATAA fd;
     snprintf(pat, sizeof pat, "%s*", dir);
@@ -131,6 +132,79 @@ static int find_file(const char *dir, const char *suffix, char *out, size_t n, i
     return found;
 }
 #endif
+
+/* --- locating the user's disc and System Card --- */
+#define DISC_CRC 0xA938A663u     /* first 32 data-track sectors of Akumajou Dracula X Chi no Rondo (JP) */
+#define SYSCARD_CRC 0x6D9A73EFu  /* Super CD-ROM2 System 3.00 (J), headerless */
+static uint32_t crc32b(const uint8_t *p, size_t n) {
+    uint32_t c = ~0u;
+    while (n--) { c ^= *p++; for (int k = 0; k < 8; k++) c = c >> 1 ^ (0xEDB88320u & -(c & 1)); }
+    return ~c;
+}
+static int check_syscard(const char *path) {
+    FILE *f = fopen(path, "rb"); if (!f) return 0;
+    static uint8_t buf[262144 + 512]; size_t n = fread(buf, 1, sizeof buf, f); fclose(f);
+    return n >= 262144 && crc32b(buf + n - 262144, 262144) == SYSCARD_CRC;
+}
+static int check_disc(const char *cue) {
+    static pce_t T;
+    if (pce_init(&T, cue, NULL) || T.disc_sectors < 32) return 0;
+    int ok = crc32b(T.disc, 32 * 2048) == DISC_CRC;
+    free(T.disc); T.disc = NULL;
+    return ok;
+}
+static int pick_file(const char *title, const char *filter_name, const char *pattern, char *out, size_t n) {
+#ifdef _WIN32
+    char filt[256]; int a = snprintf(filt, sizeof filt, "%s", filter_name) + 1; int b = snprintf(filt + a, sizeof filt - a, "%s", pattern) + 1;
+    filt[a + b] = 0;
+    OPENFILENAMEA o; memset(&o, 0, sizeof o); out[0] = 0;
+    o.lStructSize = sizeof o; o.lpstrFilter = filt; o.lpstrFile = out; o.nMaxFile = (DWORD)n; o.lpstrTitle = title;
+    o.Flags = OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST | OFN_NOCHANGEDIR;
+    return GetOpenFileNameA(&o) ? 1 : 0;
+#else
+    char cmd[512]; snprintf(cmd, sizeof cmd, "zenity --file-selection --title='%s' --file-filter='%s | %s' 2>/dev/null", title, filter_name, pattern);
+    FILE *p = popen(cmd, "r"); if (!p) return 0;
+    if (!fgets(out, (int)n, p)) { pclose(p); return 0; }
+    pclose(p); out[strcspn(out, "\r\n")] = 0; return out[0] != 0;
+#endif
+}
+static int ask(const char *text) {
+    const SDL_MessageBoxButtonData bt[] = { { SDL_MESSAGEBOX_BUTTON_RETURNKEY_DEFAULT, 1, "Select..." }, { SDL_MESSAGEBOX_BUTTON_ESCAPEKEY_DEFAULT, 0, "Quit" } };
+    SDL_MessageBoxData d = { SDL_MESSAGEBOX_INFORMATION, NULL, "Rondo of Blood Recompiled", text, 2, bt, NULL };
+    int r = 0; SDL_ShowMessageBox(&d, &r); return r;
+}
+/* paths.txt (next to the exe): line 1 disc .cue, line 2 System Card */
+static int locate_game(char *cue, char *bios) {
+    char pp[1200], line[1024]; snprintf(pp, sizeof pp, "%spaths.txt", base);
+    cue[0] = bios[0] = 0;
+    FILE *f = fopen(pp, "r");
+    if (f) {
+        if (fgets(line, sizeof line, f)) { line[strcspn(line, "\r\n")] = 0; snprintf(cue, 1024, "%s", line); }
+        if (fgets(line, sizeof line, f)) { line[strcspn(line, "\r\n")] = 0; snprintf(bios, 1024, "%s", line); }
+        fclose(f);
+    }
+    if (getenv("RONDO_DISC")) snprintf(cue, 1024, "%s", getenv("RONDO_DISC"));
+    if (getenv("RONDO_SYSCARD")) snprintf(bios, 1024, "%s", getenv("RONDO_SYSCARD"));
+    if (!(cue[0] && check_disc(cue)) && !(find_file(base, ".cue", cue, 1024, 3) && check_disc(cue))) {
+        const char *msg = "Select your own disc image of Akumajou Dracula X: Chi no Rondo (Japan), the .cue file.\n"
+                          "Its .img/.bin must be in the same folder. No game data is included with this program.";
+        for (;;) {
+            if (!ask(msg) || !pick_file("Select your Rondo of Blood disc (.cue)", "Cue sheet (*.cue)", "*.cue", cue, 1024)) return 1;
+            if (check_disc(cue)) break;
+            msg = "That disc image isn't Akumajou Dracula X: Chi no Rondo (Japan), or its data track is modified.\nSelect the .cue of an unmodified JP disc image.";
+        }
+    }
+    if (!(bios[0] && check_syscard(bios)) && !(find_file(base, "syscard3.pce", bios, 1024, 3) && check_syscard(bios))) {
+        const char *msg = "Select your own dump of the Super CD-ROM2 System Card 3.00 (Japan).\nIt isn't included with this program.";
+        for (;;) {
+            if (!ask(msg) || !pick_file("Select your System Card 3.00 dump", "PC Engine ROM (*.pce)", "*.pce", bios, 1024)) return 1;
+            if (check_syscard(bios)) break;
+            msg = "That file isn't the Super CD-ROM2 System Card 3.00 (Japan). Select an unmodified dump.";
+        }
+    }
+    f = fopen(pp, "w"); if (f) { fprintf(f, "%s\n%s\n", cue, bios); fclose(f); }
+    return 0;
+}
 
 /* --- audio --- */
 static SDL_AudioDeviceID dev;
@@ -203,12 +277,10 @@ int main(int argc, char **argv) {
     }
 
     char cue[1024], bios[1024], msg[1400];
-    if (!find_file(base, ".cue", cue, sizeof cue, 3)) {
-        SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, "Rondo", "Put your Akumajou Dracula X disc (.cue + .img/.bin) next to this program.", NULL); return 1;
-    }
-    int have_bios = find_file(base, "syscard3.pce", bios, sizeof bios, 3);
+    if (locate_game(cue, bios)) return 1;
+    int have_bios = 1;
     snprintf(g_cue, sizeof g_cue, "%s", cue); snprintf(g_bios, sizeof g_bios, "%s", bios); g_have_bios = have_bios;
-    if (pce_init(&PM, cue, have_bios ? bios : NULL)) {
+    if (pce_init(&PM, cue, bios)) {
         snprintf(msg, sizeof msg, "Could not load the disc:\n%s", PM.error); SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, "Rondo", msg, NULL); return 1;
     }
     PM.native_on = 1;

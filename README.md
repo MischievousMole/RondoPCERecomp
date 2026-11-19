@@ -29,8 +29,11 @@ The first build runs `tools/gen_from_disc.py`, which reads your disc, verifies e
 Optional variant: `harness/build_player.sh windows santable` adds an idle screensaver (`extras/santable/`).
 
 ## Running
-Put the executable in the folder with your `.cue` and `syscard3.pce`. It writes `settings.ini`, `rondo.log` and
-save files beside the executable.
+On first launch the program asks for your disc (`.cue`) and your System Card 3.00 dump (unless they are already in
+its folder), checks both against known checksums, and remembers them in `paths.txt`. It writes `settings.ini`,
+`rondo.log` and save files beside the executable.
+
+Releases contain no game assets. The original game is required to run this project.
 
 Default keys: arrows = d-pad, Z = I (jump), X = II (attack), Enter = Run, Right Shift = Select, Esc = menu,
 F11 = fullscreen. All bindings (keyboard and controller) can be changed in the menu.
