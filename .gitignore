@@ -19,3 +19,6 @@ harness/video_test
 harness/video_test1
 harness/santable_gen.h
 harness/santable_word.tmp
+*.sav
+*.ppm
+docs/*_sheet.png

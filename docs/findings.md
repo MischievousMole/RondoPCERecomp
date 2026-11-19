@@ -33,7 +33,7 @@ ex_rnd, ex_scrmod, ex_imode, ex_colorcmd, ex_dotmod, ex_bcdbin, ma_mul8u/mul8s/d
 - +$02..$05 and +$07..$0A: stage progress (main / alternate route). Setting one of them selects the stage
   Game Start loads (e.g. $02=1 -> castle bridge, music track 9; $02=2 -> track 10; $03=1 -> 13; $03=2 -> 14).
 - +$1F..$21 money (BCD). +$24 = 01 after the Prologue.
-- Coverage warps: copy tools/save_template.sav into OUT/bram, patch one byte, route "7600:08,7606:00,7900:01,7904:00,8100:01,8104:00".
+- Coverage warps: copy a System Card save made on your own console/disc into OUT/bram, patch one byte, route "7600:08,7606:00,7900:01,7904:00,8100:01,8104:00".
 
 ## Coverage 2026-11-13
 65 bank versions, 41,695 executed instruction addresses (Stage 0-1 random play + 16 stage-save warps).
