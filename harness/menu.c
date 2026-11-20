@@ -3,6 +3,7 @@
 #include <stdio.h>
 #include <string.h>
 #include "menu.h"
+#include "version.h"
 #include "font_gen.h"
 
 enum { P_LAUNCH, P_PAUSE, P_VIDEO, P_AUDIO, P_CONTROLS };
@@ -180,6 +181,7 @@ void menu_draw(uint32_t *buf, int pw_, int ph_) {
     if (launcher && page == P_LAUNCH) {
         text((w - 18 * FONT_W * 3) / 2, 60, "AKUMAJOU DRACULA X", 0xD8D0C0, 3);
         text((w - 12 * FONT_W) / 2, 100, "CHI NO RONDO", RED, 1);
+        textr(w - 8, h - 14, "v" RONDO_VERSION, 0x707070);
     }
     fill(px - 10, top - 8, pw + 20, ph, 0xF5101010);
     if (has_t) text(px, top, titles[page], GOLD, 1);

@@ -16,6 +16,7 @@
 #include "video.h"
 #include "shaders_gen.h"
 #include "menu.h"
+#include "version.h"
 #ifdef SANTABLE
 #include "santable_gen.h"   /* SANTABLE_FRAG + WORDMARK (generated from extras/santable) */
 #endif
@@ -286,7 +287,7 @@ int main(int argc, char **argv) {
     PM.native_on = 1;
     { char lp[1200]; snprintf(lp, sizeof lp, "%srondo.log", base); FILE *lf = fopen(lp, "w"); PM.log = lf ? lf : stderr; if (lf) setvbuf(lf, NULL, _IOLBF, 0); }
     PM.verbose = 1;
-    fprintf(PM.log, "cue: %s\nbios: %s\ndata sectors: %ld\n", cue, have_bios ? bios : "(none)", PM.disc_sectors);
+    fprintf(PM.log, "RondoRecomp v" RONDO_VERSION "\ncue: %s\nbios: %s\ndata sectors: %ld\n", cue, have_bios ? bios : "(none)", PM.disc_sectors);
     for (int i = 0; i < PM.ntoc; i++) fprintf(PM.log, "track %d %s start %ld frames %ld\n", PM.toc[i].track, PM.toc[i].audio ? "AUDIO" : "DATA", PM.toc[i].start, PM.toc[i].frames);
     { extern const char *bram_dir; static char bd[1100]; snprintf(bd, sizeof bd, "%ssaves", base); bram_dir = bd; }
 
@@ -300,7 +301,7 @@ int main(int argc, char **argv) {
     SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_CORE);
     SDL_DisplayMode dm; SDL_GetDesktopDisplayMode(0, &dm);
     int windowed = getenv("RONDO_TEST_FRAMES") != NULL;   /* test mode: plain window at desktop size */
-    SDL_Window *win = SDL_CreateWindow("Akumajou Dracula X: Chi no Rondo", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED,
+    SDL_Window *win = SDL_CreateWindow("Akumajou Dracula X: Chi no Rondo - v" RONDO_VERSION, SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED,
                                        windowed ? dm.w : 1280, windowed ? dm.h : 720,
                                        SDL_WINDOW_OPENGL | SDL_WINDOW_RESIZABLE | SDL_WINDOW_ALLOW_HIGHDPI | (windowed || !fullscreen ? 0 : SDL_WINDOW_FULLSCREEN_DESKTOP));
     SDL_GLContext gl = SDL_GL_CreateContext(win);
