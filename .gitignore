@@ -22,3 +22,8 @@ harness/santable_word.tmp
 *.sav
 *.ppm
 docs/*_sheet.png
+harness/pcerun
+harness/pcerun_native
+harness/video_test
+harness/video_test1
+harness/native_test/

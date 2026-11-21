@@ -1,4 +1,4 @@
-/* VDC/VCE scanline renderer (BG + 64 sprites, 16 sprites/line limit not enforced). */
+/* VDC/VCE scanline renderer (BG + 64 sprites, hardware limit of 16 sprite cells per line). */
 #include <string.h>
 #include "pce.h"
 
@@ -7,6 +7,8 @@
 uint32_t g_fb[FB_W * FB_H];
 uint8_t g_layer[FB_W * FB_H];   /* 0 backdrop, 1 BG tile, 2 sprite */
 int g_dotclk;
+int g_sprite_limit = 1;      /* 0: draw every sprite (no flicker/dropout), an enhancement option */
+int g_sprite_overflow;
 int g_fb_w = 256, g_fb_h = 224;
 
 static uint32_t rgb(uint16_t c) {
@@ -42,20 +44,31 @@ void render_line(pce_t *m, int y, int bg_y) {
         }
     }
     if (cr & 0x40) {
-        for (int i = 63; i >= 0; i--) {
+        /* the VDC fetches at most 16 sprite cells (16 px wide each; a 32-wide sprite is 2) per line, in SATB order */
+        int vis[64], nv = 0, cells = 0;
+        for (int i = 0; i < 64; i++) {
+            const uint16_t *s = &v->satb[i * 4];
+            int sy = (s[0] & 0x3FF) - 64; uint16_t at = s[3];
+            int hgt = (((at >> 12) & 3) == 0 ? 1 : ((at >> 12) & 3) == 1 ? 2 : 4) * 16;
+            if (y < sy || y >= sy + hgt) continue;
+            int cw = (at & 0x100) ? 2 : 1;
+            if (cells + cw > 16 && g_sprite_limit) { g_sprite_overflow = 1; if (cells < 16 && cw == 2) vis[nv++] = i | 0x100; break; }
+            cells += cw; vis[nv++] = i;
+        }
+        for (int j = nv - 1; j >= 0; j--) {
+            int i = vis[j] & 0xFF, half = vis[j] >> 8;   /* half: only the left cell fits */
             const uint16_t *s = &v->satb[i * 4];
             int sy = (s[0] & 0x3FF) - 64, sxp = (s[1] & 0x3FF) - 32;
             uint16_t at = s[3];
             int cw = (at & 0x100) ? 2 : 1, chh = ((at >> 12) & 3) == 0 ? 1 : ((at >> 12) & 3) == 1 ? 2 : 4;
             int hgt = chh * 16;
-            if (y < sy || y >= sy + hgt) continue;
             int ly = y - sy;
             if (at & 0x8000) ly = hgt - 1 - ly;
             uint16_t pat = (s[2] >> 1) & 0x3FF;
             if (cw == 2) pat &= ~1;
             if (chh == 2) pat &= ~2; else if (chh == 4) pat &= ~6;
             int cy = ly >> 4, ry = ly & 15;
-            for (int cx = 0; cx < cw; cx++) {
+            for (int cx = 0; cx < (half ? 1 : cw); cx++) {
                 int ccx = (at & 0x800) ? (cw - 1 - cx) : cx;
                 uint16_t base = ((pat + ccx + cy * 2) & 0x3FF) * 64 + ry;
                 uint16_t p0 = v->vram[base & 0x7FFF], p1 = v->vram[(base + 16) & 0x7FFF];

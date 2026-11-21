@@ -1,15 +1,18 @@
 """Build recipe/overlays.txt: for every translated bank version, which offsets are instructions and where
 each run of instruction bytes can be read from the disc's data track. Contains no game bytes.
-Usage: make_recipe.py OVL_DIR DATA_ISO OUT"""
+Usage: make_recipe.py OVL_DIR DATA_ISO OUT [SYSCARD.pce]
+System Card banks (00-1F) are located in the System Card dump instead (R lines)."""
 import sys, os, glob, zlib
 sys.path.insert(0, os.path.dirname(__file__))
 from dis6280 import OP, M
 ovl_dir, iso, out = sys.argv[1:4]
 disc = open(iso, 'rb').read()
+rom = open(sys.argv[4], 'rb').read()[-0x40000:] if len(sys.argv) > 4 else None
 lines = []; nseg = 0; missing = 0
 for covf in sorted(glob.glob(os.path.join(ovl_dir, 'cov_*.bin'))):
     key = os.path.basename(covf)[4:-4]; bank = int(key[:2], 16)
-    if bank in (0x00, 0xF8): continue
+    if bank < 0x20 and rom is None: continue
+    src = rom if bank < 0x20 else disc; tag = 'R' if bank < 0x20 else 'S'
     code = open(os.path.join(ovl_dir, f'bank_{key}.bin'), 'rb').read(); cov = open(covf, 'rb').read()
     need = bytearray(0x2000)
     for i in range(0x2000):
@@ -26,12 +29,12 @@ for covf in sorted(glob.glob(os.path.join(ovl_dir, 'cov_*.bin'))):
         else: i += 1
     segs = []
     for a, b in runs:
-        pos = disc.find(code[a:b])
+        pos = src.find(code[a:b])
         if pos < 0:   # split the run until every piece is found
             stack = [(a, b)]
             while stack:
                 x, y = stack.pop()
-                p = disc.find(code[x:y])
+                p = src.find(code[x:y])
                 if p >= 0: segs.append((x, y - x, p))
                 elif y - x > 1: m = (x + y) // 2; stack += [(m, y), (x, m)]
                 else: missing += 1
@@ -40,6 +43,6 @@ for covf in sorted(glob.glob(os.path.join(ovl_dir, 'cov_*.bin'))):
     crc = zlib.crc32(bytes(code[i] if need[i] else 0 for i in range(0x2000)))
     nseg += len(segs)
     lines.append(f'O {key} {crc:08x} {cov.hex()}')
-    lines += [f'S {o:04x} {n} {p:x}' for o, n, p in segs]
-open(out, 'w').write('# Rondo recomp overlay recipe: O bank_hash crc32(code bytes) coverage-bitmap / S bank_offset length disc_offset\n' + '\n'.join(lines) + '\n')
+    lines += [f'{tag} {o:04x} {n} {p:x}' for o, n, p in segs]
+open(out, 'w').write('# Rondo recomp overlay recipe: O bank_hash crc32(code bytes) coverage-bitmap / S bank_offset length disc_offset / R ... syscard_offset\n' + '\n'.join(lines) + '\n')
 print(f'{len([l for l in lines if l[0]=="O"])} overlays, {nseg} segments, {missing} bytes not found on disc')

@@ -10,7 +10,7 @@ PY
 python3 ../tools/gen_font.py font_gen.h
 if [ ! -f native/native_table.c ]; then
   [ -n "$RONDO_DISC" ] || { echo "Set RONDO_DISC=/path/to/your/game.cue to generate the recompiled code from your disc"; exit 1; }
-  python3 ../tools/gen_from_disc.py "$RONDO_DISC" native
+  python3 ../tools/gen_from_disc.py "$RONDO_DISC" native ${RONDO_SYSCARD:+"$RONDO_SYSCARD"}
 fi
 SRC="player.c menu.c pce.c cpu6280.c bios_hle.c render.c audio.c video.c disc.c native/*.c"
 T=${1:-linux}

@@ -4,7 +4,8 @@
 #include <stdint.h>
 #include "cpu6280.h"
 
-extern uint32_t g_ovl_epoch;   /* bumped whenever a bank is reloaded */
+extern uint32_t g_ovl_epoch;
+extern int16_t g_bios_icept[0x2000];   /* System Card entry points handled by the HLE (-1: none) */   /* bumped whenever a bank is reloaded */
 
 static inline uint8_t zr_(cpu6280 *c, uint8_t z) { return c->read(c->ctx, ((uint32_t)c->mpr[1] << 13) | z); }
 static inline void zw_(cpu6280 *c, uint8_t z, uint8_t v) { c->write(c->ctx, ((uint32_t)c->mpr[1] << 13) | z, v); }

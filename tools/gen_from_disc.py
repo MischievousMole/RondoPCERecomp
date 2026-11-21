@@ -1,5 +1,6 @@
 """Generate the recompiled C (harness/native) from the user's own disc.
-Usage: gen_from_disc.py DISC.cue|data.iso [OUT_DIR]   (default OUT_DIR: harness/native)"""
+Usage: gen_from_disc.py DISC.cue|data.iso [OUT_DIR] [SYSCARD.pce]   (default OUT_DIR: harness/native)
+With the System Card dump, its routines are translated too; without it they stay interpreted."""
 import sys, os, re, zlib, tempfile, subprocess
 here = os.path.dirname(os.path.abspath(__file__))
 
@@ -23,6 +24,8 @@ def data_track(path):
 
 disc = data_track(sys.argv[1])
 out = sys.argv[2] if len(sys.argv) > 2 else os.path.join(here, '../harness/native')
+rom = open(sys.argv[3], 'rb').read()[-0x40000:] if len(sys.argv) > 3 else None
+skip_rom = False
 tmp = tempfile.mkdtemp()
 cur = None; bad = 0; n = 0
 def finish():
@@ -36,9 +39,11 @@ for line in open(os.path.join(here, '../recipe/overlays.txt')):
     if line[0] == 'O':
         finish(); _, key, crc, cov = line.split()
         cur = (key, int(crc, 16), bytes.fromhex(cov), bytearray(0x2000))
-    elif line[0] == 'S':
+    elif line[0] in 'SR':
+        if line[0] == 'R' and rom is None: cur = None; continue
+        if cur is None: continue
         _, o, ln, p = line.split(); o, ln, p = int(o, 16), int(ln), int(p, 16)
-        cur[3][o:o + ln] = disc[p:p + ln]
+        cur[3][o:o + ln] = (disc if line[0] == 'S' else rom)[p:p + ln]
 finish()
 print(f'{n} overlays rebuilt from disc, {bad} mismatches')
 if os.path.isdir(out):

@@ -239,7 +239,8 @@ int bios_hle_trap(void *ctx, cpu6280 *c) {
 /* Real System Card mode: calls listed here run the ROM's own code; everything else is intercepted. */
 static const uint8_t passthrough[] = { 32, 60, 61, 63, 64, 65, 66, 67, 68, 69, 70, 71, 72, 73, 75 };
 #define MAGIC_PC 0xFFF2
-static int16_t icept[0x2000];
+int16_t g_bios_icept[0x2000];
+#define icept g_bios_icept
 
 void bios_real_install(pce_t *m) {
     for (int i = 0; i < 0x2000; i++) icept[i] = -1;

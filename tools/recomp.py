@@ -11,7 +11,9 @@ import sys, os, glob
 sys.path.insert(0, os.path.dirname(__file__))
 from dis6280 import OP, M
 
-SKIP_BANKS = {0x00, 0xF8}    # HLE BIOS stubs and the one-shot IPL loader in RAM stay interpreted
+SKIP_BANKS = set()          # System Card ROM (00-1F, from the user's dump) and RAM code (F8, byte-guarded) are translated too
+ROM_BANKS = range(0x00, 0x20)
+RAM_BANKS = (0xF8,)
 
 # cycle counts (must match cpu6280.c)
 def cycles(mn, mode):
@@ -32,19 +34,29 @@ def cycles(mn, mode):
 
 ZPMODES = ('zp', 'zpx', 'zpy')
 
+DYN = {}   # operand index -> C expression, for operand bytes the game patches at runtime (set per instruction)
+
+def B(b, i):
+    """operand byte i as C: a constant, or a live read of the (self-modified) byte"""
+    return DYN[i] if i in DYN else f'0x{b[i]:02X}'
+
+def W(b, i):
+    if i in DYN or i + 1 in DYN: return f'(uint16_t)({B(b, i)} | ({B(b, i + 1)} << 8))'
+    return f'0x{b[i] | b[i + 1] << 8:04X}'
+
 def ea_expr(mode, b):
-    o = b[1] if len(b) > 1 else 0
-    w = (b[1] | (b[2] << 8)) if len(b) > 2 else 0
+    o = B(b, 1) if len(b) > 1 else '0'
+    w = W(b, 1) if len(b) > 2 else '0'
     return {
-        'zp':  f'0x{o:02X}',
-        'zpx': f'(uint8_t)(0x{o:02X} + c->x)',
-        'zpy': f'(uint8_t)(0x{o:02X} + c->y)',
-        'abs': f'0x{w:04X}',
-        'abx': f'(uint16_t)(0x{w:04X} + c->x)',
-        'aby': f'(uint16_t)(0x{w:04X} + c->y)',
-        'izx': f'ZR16((uint8_t)(0x{o:02X} + c->x))',
-        'izy': f'(uint16_t)(ZR16(0x{o:02X}) + c->y)',
-        'izp': f'ZR16(0x{o:02X})',
+        'zp':  f'{o}',
+        'zpx': f'(uint8_t)({o} + c->x)',
+        'zpy': f'(uint8_t)({o} + c->y)',
+        'abs': f'{w}',
+        'abx': f'(uint16_t)({w} + c->x)',
+        'aby': f'(uint16_t)({w} + c->y)',
+        'izx': f'ZR16((uint8_t)({o} + c->x))',
+        'izy': f'(uint16_t)(ZR16({o}) + c->y)',
+        'izp': f'ZR16({o})',
     }[mode]
 
 def rd(mode, e):  return f'ZR({e})' if mode in ZPMODES else f'MR({e})'
@@ -61,7 +73,7 @@ def translate_insn(off, b, after_set, next_off):
     nxt = f'(uint16_t)(wb + 0x{next_off:04X})'
     s = []
     val = None
-    if mode == 'imm': val = f'0x{b[1]:02X}'
+    if mode == 'imm': val = B(b, 1)
     elif mode in ('zp','zpx','zpy','abs','abx','aby','izx','izy','izp') and mn not in ('JMP','JSR'):
         val = None  # computed below
     ex = None  # control transfer code (string) or None for fallthrough
@@ -146,12 +158,12 @@ def translate_insn(off, b, after_set, next_off):
         else: s.append(f'ZW({z}, ZR({z}) & 0x{(~(1 << bit)) & 0xFF:02X});')
         cyc = 7
     elif mn == 'JMP':
-        if mode == 'abs': ex = f'c->pc = 0x{b[1] | b[2] << 8:04X}; goto top;'
-        elif mode == 'ind': ex = f'c->pc = MR16(0x{b[1] | b[2] << 8:04X}); goto top;'
-        else: ex = f'c->pc = MR16((uint16_t)(0x{b[1] | b[2] << 8:04X} + c->x)); goto top;'
+        if mode == 'abs': ex = f'c->pc = {W(b, 1)}; goto top;'
+        elif mode == 'ind': ex = f'c->pc = MR16({W(b, 1)}); goto top;'
+        else: ex = f'c->pc = MR16((uint16_t)({W(b, 1)} + c->x)); goto top;'
     elif mn == 'JSR':
         s.append(f'{{ uint16_t r_ = (uint16_t)(wb + 0x{off + 2:04X}); cpu_push(c, r_ >> 8); cpu_push(c, r_ & 0xFF); }}')
-        ex = f'c->pc = 0x{b[1] | b[2] << 8:04X}; goto top;'
+        ex = f'c->pc = {W(b, 1)}; goto top;'
     elif mn == 'RTS':
         ex = '{ uint16_t l_ = cpu_pull(c); c->pc = (uint16_t)((l_ | (cpu_pull(c) << 8)) + 1); } goto top;'
     elif mn == 'RTI':
@@ -182,7 +194,7 @@ def translate_insn(off, b, after_set, next_off):
     elif mn == 'NOP': pass
     elif mn in ('ST0','ST1','ST2'):
         a = {'ST0':'0x1FE000','ST1':'0x1FE002','ST2':'0x1FE003'}[mn]
-        s.append(f'c->write(c->ctx, {a}, 0x{b[1]:02X});')
+        s.append(f'c->write(c->ctx, {a}, {B(b, 1)});')
     elif mn == 'TAM':
         mk = b[1]
         for i in range(8):
@@ -213,16 +225,17 @@ def translate_overlay(bank, h, code, cov):
     lines = []
     fn = f'N_{bank:02X}_{h:08X}'
     labels = []
-    insn = {}
+    insn = {}; dyn = {}; opchk = {}
     for off in starts:
         op = code[off]
         mn, mode = OP.get(op, ('NOP', 'imp'))
         n = 1 + M[mode][0]
         if off + n > 0x2000 or op in (0xFB, 0x00):
             continue
-        if any(i in VOLATILE.get(bank, ()) for i in range(off, off + n)):
-            continue   # patched at runtime: interpret
+        vol = VOLATILE.get(bank, ()) if bank not in RAM_BANKS else ()
         insn[off] = bytes(code[off:off + n])
+        if off in vol: opchk[off] = code[off]   # opcode byte is patched at runtime: translate the observed one, checked live
+        dyn[off] = {i - off: f'MR((uint16_t)(wb + 0x{i:04X}))' for i in range(off + 1, off + n) if i in vol}
     codemap = bytearray(1024)
     body = []
     bails = 0
@@ -231,16 +244,32 @@ def translate_overlay(bank, h, code, cov):
         b = insn[off]; nxt = off + len(b)
         # instruction directly after a SET?
         after_set = (off - 1) in insn and insn[off - 1][0] == 0xF4
+        DYN.clear(); DYN.update(dyn[off])
         try:
+            mnm, mde = OP.get(b[0], ('NOP', 'imp'))
+            if DYN and (mde in ('rel', 'zrel') or mnm in ('TII','TDD','TIN','TIA','TAI','TST') or mnm.startswith(('RMB','SMB'))):
+                raise Bail('volatile operand')
             st, cyc, ex = translate_insn(off, b, after_set, nxt)
         except Bail as e:
             bails += 1
             continue
-        for i in range(off, nxt): codemap[i >> 3] |= 1 << (i & 7)
+        finally:
+            pass
+        for i in range(off, nxt):
+            if i - off not in DYN and i not in opchk: codemap[i >> 3] |= 1 << (i & 7)
         labels.append(off)
         body.append(f'L{off:04X}: /* {b.hex()} */')
+        if bank in RAM_BANKS:   # code in RAM: run the translation only while the bytes are still the ones translated
+            chk = ' || '.join(f'MR((uint16_t)(wb + 0x{off + i:04X})) != 0x{b[i]:02X}' for i in range(len(b)))
+            body.append(f'  if ({chk}) {{ c->pc = (uint16_t)(wb + 0x{off:04X}); return cyc; }}')
+        if off in opchk:
+            body.append(f'  if (MR((uint16_t)(wb + 0x{off:04X})) != 0x{opchk[off]:02X}) {{ c->pc = (uint16_t)(wb + 0x{off:04X}); return cyc; }}')
+        if bank == 0x00: body.append(f'  if (g_bios_icept[0x{off:04X}] >= 0) {{ c->pc = (uint16_t)(wb + 0x{off:04X}); return cyc; }}')
         body.append(f'  c->ninstr++; cyc += {cyc};' + ('' if (after_set or ex == 'SET') else ' T = 0;'))
         for x in st: body.append('  ' + x)
+        if any(('MW(' in x or 'ZW(' in x or 'cpu_block' in x) for x in st) and ex != 'SET':
+            # the store may have overwritten code in a translated bank: leave before running stale code
+            body.append(f'  if (g_ovl_epoch != epoch) {{ c->pc = (uint16_t)(wb + 0x{nxt:04X}); return cyc; }}')
         if after_set and ex != 'SET': body.append('  T = 0;')
         if ex == 'SET':
             if nxt in insn and nxt < 0x2000: continue

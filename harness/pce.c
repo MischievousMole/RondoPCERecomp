@@ -136,7 +136,7 @@ void pce_write(void *ctx, uint32_t a, uint8_t v) {
         int o = m->cur_ovl[bank];
         int code = (m->ovl[o].bits[off >> 3] >> (off & 7) & 1) ||
                    (m->native_cm[bank] && (m->native_cm[bank][off >> 3] >> (off & 7) & 1));
-        if (code) {
+        if (code && pce_read(m, a) != v) {
             /* CPU wrote over executed code: overlay copy or self-modification -> re-identify the bank */
             m->smc_writes++;
             if (m->verbose && m->smc_writes < 50)
@@ -251,7 +251,10 @@ void pce_save_coverage(pce_t *m) {
     }
 }
 
+long g_sprite_ovf_lines;
+uint32_t *g_iprof; long g_ireason[4];   /* PCE_IPROF: interpreted instructions per physical address; reason: 0 no native overlay, 1 native disabled, 2 no progress, 3 trace */
 static void run_cycles(pce_t *m, int budget) {
+    int why = 0;
     cpu6280 *c = &m->cpu;
     while (budget > 0 && !m->stop) {
         uint32_t ph = cpu_phys(c, c->pc);
@@ -263,6 +266,7 @@ static void run_cycles(pce_t *m, int budget) {
             m->ovl[m->cur_ovl[bank]].bits[off >> 3] |= 1 << (off & 7);
         }
         if (m->real_bios && bios_real_intercept(m, c)) { budget -= 8; timer_tick(m, 8); continue; }
+        why = m->trace_left ? 3 : 0;
         if (m->native_on && !m->trace_left) {
             int oi = m->cur_ovl[ph >> 13];
             int ni = m->ovl_native[oi];
@@ -272,6 +276,7 @@ static void run_cycles(pce_t *m, int budget) {
                     if (g_native_table[k].bank == m->ovl[oi].bank && g_native_table[k].hash == m->ovl[oi].hash) { ni = k; break; }
                 m->ovl_native[oi] = ni;
             }
+            if (ni >= 0 && m->ovl_native_off[oi]) why = 1;
             if (ni >= 0 && !m->ovl_native_off[oi]) {
                 m->native_cm[ph >> 13] = g_native_table[ni].codemap;
                 m->native_cm_ovl[ph >> 13] = oi;
@@ -284,7 +289,7 @@ static void run_cycles(pce_t *m, int budget) {
                 int cyc = g_native_table[ni].fn(c, budget);
                 m->psg_log = pl;
                 uint32_t k = c->ninstr - n0;
-                if (k == 0 && c->pc == pc0) goto interp;   /* no progress: let the interpreter step */
+                if (k == 0 && c->pc == pc0) { why = 2; goto interp; }   /* no progress: let the interpreter step */
                 if (check) {
                     after = *m;
                     *m = snap; m->psg_log = pl;
@@ -325,9 +330,10 @@ static void run_cycles(pce_t *m, int budget) {
             fprintf(m->log, "T %02X:%04X %02X %02X %02X  A=%02X X=%02X Y=%02X S=%02X P=%02X\n", c->mpr[c->pc >> 13], c->pc,
                     cpu_read(c, c->pc), cpu_read(c, c->pc + 1), cpu_read(c, c->pc + 2), c->a, c->x, c->y, c->s, c->p);
         }
-        uint32_t n0i = c->ninstr;
+        uint32_t n0i = c->ninstr, iph = cpu_phys(c, c->pc);
         int cyc = cpu_step(c);
         m->interp_instr += c->ninstr - n0i;
+        if (g_iprof && m->native_on) { g_iprof[iph & 0x1FFFFF] += c->ninstr - n0i; g_ireason[why] += c->ninstr - n0i; }
         if (cyc < 0) { m->stop = 1; break; }
         int fast = c->speed ? cyc : cyc * 4;
         budget -= fast;
@@ -349,8 +355,12 @@ void pce_run_frame(pce_t *m) {
         if (m->line == v->disp_start) { v->line_ctr = 64; v->bg_y = v->reg[8]; }
         /* raster compare: the counter keeps running through the blanking lines, so RCR can match below the picture */
         if ((v->reg[6] & 0x3FF) == v->line_ctr && (v->reg[5] & 0x04)) { v->status |= 0x04; vdc_irq_update(m); }
-        if (m->line >= v->disp_start && m->line < v->disp_end)
+        if (m->line >= v->disp_start && m->line < v->disp_end) {
+            g_sprite_overflow = 0;
             render_line(m, m->line - v->disp_start, v->bg_y);
+            if (g_sprite_overflow) g_sprite_ovf_lines++;
+            if (g_sprite_overflow && (v->reg[5] & 0x02)) { v->status |= 0x02; vdc_irq_update(m); }
+        }
         run_cycles(m, CPU_CYC_PER_LINE);
         {
             /* audio: 48 kHz / 15734.26 Hz lines */

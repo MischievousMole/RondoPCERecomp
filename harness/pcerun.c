@@ -30,6 +30,7 @@ int main(int argc, char **argv) {
     M.outdir = out;
     { extern const char *bram_dir; static char bd[512]; snprintf(bd, sizeof bd, "%s/bram", out); bram_dir = bd; }
     if (getenv("PCE_NATIVE")) M.native_on = 1;
+    if (getenv("PCE_NOSPRLIMIT")) g_sprite_limit = 0;
     if (getenv("PCE_VCELOG")) M.vce_log = 1;
     if (getenv("PCE_WATCH")) M.watch = strtol(getenv("PCE_WATCH"), NULL, 16);
     if (tracks && pce_load_toc(&M, tracks) < 0) fprintf(stderr, "no toc in %s\n", tracks);
@@ -41,6 +42,8 @@ int main(int argc, char **argv) {
     snprintf(path, sizeof path, "%s/psg.log", out);
     M.psg_log = fopen(path, "w");
     if (getenv("PCE_WAV")) { M.wav = fopen(getenv("PCE_WAV"), "wb"); char hdr[44] = {0}; fwrite(hdr, 1, 44, M.wav); }
+    extern uint32_t *g_iprof; extern long g_ireason[4];
+    if (getenv("PCE_IPROF")) g_iprof = calloc(0x200000, 4);
     cpu_reset(&M.cpu);
     for (long f = 0; f < frames && !M.stop; f++) {
         if (script) {
@@ -107,6 +110,11 @@ int main(int argc, char **argv) {
             snprintf(path, sizeof path, "%s/frame_%06ld.ppm", out, f);
             render_save_ppm(path, g_fb_h);
         }
+    }
+    { extern long g_sprite_ovf_lines; fprintf(stderr, "sprite-limit lines=%ld\n", g_sprite_ovf_lines); }
+    if (g_iprof) {
+        snprintf(path, sizeof path, "%s/iprof.bin", out); FILE *fp = fopen(path, "wb"); fwrite(g_iprof, 4, 0x200000, fp); fclose(fp);
+        fprintf(stderr, "interp reasons: no-native=%ld disabled=%ld no-progress=%ld trace=%ld\n", g_ireason[0], g_ireason[1], g_ireason[2], g_ireason[3]);
     }
     pce_save_coverage(&M);
     snprintf(path, sizeof path, "%s/cov.bin", out);

@@ -1,4 +1,4 @@
 # bank:offset+count - bytes the game patches at runtime (excluded from overlay hashes, interpreted)
 6C:0000+3
-6B:1E00+1
+6B:1E00+2
 F8:0000+8192

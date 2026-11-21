@@ -9,6 +9,7 @@ You need:
 
 ## Features
 - Native recompiled CPU code (one C function per code bank / overlay), checked against a reference interpreter
+- Hardware sprite limit (16 sprite cells per line), so sprite dropout matches the console
 - PC Engine CD hardware model: VDC, VCE, PSG, ADPCM, CD-DA, System Card 3.0 (hybrid HLE + your ROM)
 - Original game speed: VRR clock at the PCE's 59.826 Hz, or vsync-locked
 - 120 Hz presentation (frame repeat or black-frame insertion)
@@ -21,10 +22,12 @@ You need:
 ## Building
 Requirements: Python 3, GCC (Linux) or MinGW-w64 (Windows cross-build), SDL2 2.30+.
 
-    RONDO_DISC=/path/to/your/game.cue harness/build_player.sh windows     # or: linux
+    RONDO_DISC=/path/to/your/game.cue RONDO_SYSCARD=/path/to/syscard3.pce harness/build_player.sh windows   # or: linux
 
-The first build runs `tools/gen_from_disc.py`, which reads your disc, verifies every code bank against the CRC in
-`recipe/overlays.txt`, and translates it into `harness/native/` (ignored by git). Output goes to `build/player/<target>/`.
+The first build runs `tools/gen_from_disc.py`, which reads your disc and System Card dump, verifies every code bank
+against the CRC in `recipe/overlays.txt`, and translates it into `harness/native/` (ignored by git). The game's code,
+the System Card routines it calls and the code it runs from RAM are all translated; the interpreter remains only as a
+fallback for code paths not yet recorded in the recipe. Output goes to `build/player/<target>/`.
 
 Optional variant: `harness/build_player.sh windows santable` adds an idle screensaver (`extras/santable/`).
 
